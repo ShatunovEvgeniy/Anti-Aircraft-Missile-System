@@ -1,0 +1,12 @@
+class Radiolocator:
+    type: int
+    x: float
+    y: float
+    z: float
+    detection_range: float
+    azimuth_angle: float
+    elevation_angle: float
+    detection_probability: float
+    false_alarm_probability: float
+    max_targets: int
+    scan_frequency: float
