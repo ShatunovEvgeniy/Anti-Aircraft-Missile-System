@@ -31,7 +31,9 @@ class PointCanvas(QWidget):
         self.launch_pads = []
 
         self.simulation_time = 0.0
+        self.auto_max_time = 0.0
         self.max_time = 0.0
+        self.simulation_duration_override = 0.0
         self.animation_timer = QTimer()
         self.animation_timer.timeout.connect(self.update_animation)
         self.is_animating = False
@@ -128,9 +130,40 @@ class PointCanvas(QWidget):
             self.update()
 
     # ========== Обновления ==========
+    def _get_auto_max_time(self):
+        trajectory_times = [t.travel_time for t in self.trajectories if t.travel_time != float('inf')]
+        base_time = max(trajectory_times) if trajectory_times else 0.0
+
+        radar_buffer = 0.0
+        radar_periods = [360.0 / r.rotation_speed for r in self.radars if r.rotation_speed > 0]
+        if radar_periods:
+            radar_buffer = max(radar_periods)
+
+        missile_buffer = 0.0
+        missile_times = [
+            (pad.launch_range / pad.missile_speed) + pad.missile_lifetime
+            for pad in self.launch_pads
+            if pad.missile_speed > 0
+        ]
+        if missile_times:
+            missile_buffer = max(missile_times)
+
+        return base_time + radar_buffer + missile_buffer
+
+    def _reset_simulation_entities(self):
+        for traj in self.trajectories:
+            traj.reset_simulation_state()
+        for pad in self.launch_pads:
+            pad.reset_simulation_state()
+
+    def set_simulation_duration_override(self, duration):
+        self.simulation_duration_override = max(0.0, duration)
+        self.stop_animation()
+        self._recalc_max_time()
+
     def _recalc_max_time(self):
-        times = [t.travel_time for t in self.trajectories if t.travel_time != float('inf')]
-        self.max_time = max(times) if times else 0.0
+        self.auto_max_time = self._get_auto_max_time()
+        self.max_time = max(self.auto_max_time, self.simulation_duration_override)
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             self.progress_slider.setRange(0, int(self.max_time*1000) if self.max_time>0 else 1000)
@@ -155,6 +188,8 @@ class PointCanvas(QWidget):
     def check_detections(self):
         for radar in self.radars:
             for traj in self.trajectories:
+                if traj.is_destroyed:
+                    continue
                 pos = traj.get_position(self.simulation_time)
                 if pos and radar.contains_point(pos, self.simulation_time):
                     self.detection_signal.emit(f"Радар \"{radar.name}\" обнаружил объект \"{traj.name}\"")
@@ -168,7 +203,10 @@ class PointCanvas(QWidget):
     def set_simulation_time(self, t, dt=0):
         # dt для ракет передаётся отдельно, но мы можем пересчитать из изменения времени
         old = self.simulation_time
-        self.simulation_time = max(0.0, min(t, self.max_time))
+        bounded_time = max(0.0, min(t, self.max_time))
+        if bounded_time <= 0.0 or bounded_time < old:
+            self._reset_simulation_entities()
+        self.simulation_time = bounded_time
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             if self.max_time > 0:
@@ -179,13 +217,14 @@ class PointCanvas(QWidget):
             self.progress_slider.blockSignals(False)
         # Обновляем ракеты с dt = изменение времени
         dt_actual = self.simulation_time - old
-        if dt_actual != 0:
+        if dt_actual > 0:
             self.update_missiles(dt_actual)
         self.update()
         self.check_detections()
 
     def reset_all(self):
         self.stop_animation()
+        self._reset_simulation_entities()
         self.set_simulation_time(0.0)
 
     def start_animation(self):
@@ -197,6 +236,8 @@ class PointCanvas(QWidget):
             return
         if self.is_animating:
             self.stop_animation()
+        if self.simulation_time <= 0:
+            self._reset_simulation_entities()
         if self.simulation_time >= self.max_time:
             self.set_simulation_time(0.0)
         self.is_animating = True
@@ -222,6 +263,9 @@ class PointCanvas(QWidget):
         if self.animation_timer.isActive():
             self.animation_timer.stop()
         self.is_animating = False
+        if self.simulation_time >= self.max_time > 0:
+            self._reset_simulation_entities()
+            self.update()
 
     def simulate(self):
         if self.is_animating:
@@ -436,6 +480,16 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.sim_btn)
 
         top_layout.addWidget(QLabel("Время (сек):"))
+        top_layout.addWidget(QLabel("Лимит (с):"))
+        self.duration_spin = QDoubleSpinBox()
+        self.duration_spin.setRange(0, 36000)
+        self.duration_spin.setDecimals(1)
+        self.duration_spin.setSingleStep(5.0)
+        self.duration_spin.setSpecialValueText("Авто")
+        self.duration_spin.setValue(0.0)
+        self.duration_spin.valueChanged.connect(self.canvas.set_simulation_duration_override)
+        top_layout.addWidget(self.duration_spin)
+
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0,1000)
         self.slider.setValue(0)
