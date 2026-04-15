@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QPushButton, QStatusBar, QSlider, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QInputDialog, QFileDialog,
                              QMenu, QDoubleSpinBox, QToolBar, QTabWidget, QTextEdit,
-                             QGroupBox, QFormLayout, QLineEdit, QSplitter)
+                             QGroupBox, QFormLayout, QLineEdit, QSplitter, QMessageBox)
 from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QAction, QPixmap, QIcon, QPainterPath, QPolygonF
 
@@ -415,6 +415,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Симуляция траекторий, радаров и пусковых установок")
         self.setGeometry(100,100,1300,750)
+        
+        self.changes_made = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -592,6 +594,9 @@ class MainWindow(QMainWindow):
         btn_load = QPushButton("Загрузить сценарий")
         btn_load.clicked.connect(self.load_scene)
         toolbar.addWidget(btn_load)
+        btn_new = QPushButton("Новый сценарий")
+        btn_new.clicked.connect(self.create_new_scenario)
+        toolbar.addWidget(btn_new)
 
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
@@ -602,6 +607,9 @@ class MainWindow(QMainWindow):
         self.canvas.trajectory_list_changed.connect(self.refresh_trajectory_list)
         self.canvas.radar_list_changed.connect(self.refresh_radar_list)
         self.canvas.launchpad_list_changed.connect(self.refresh_launch_list)
+        self.canvas.trajectory_list_changed.connect(self.on_data_changed)
+        self.canvas.radar_list_changed.connect(self.on_data_changed)
+        self.canvas.launchpad_list_changed.connect(self.on_data_changed)
 
         # Инициализация
         self.canvas.add_trajectory("Траектория 1")
@@ -769,11 +777,56 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить сценарий", "scene.json", "JSON (*.json)")
         if path:
             self.canvas.save_scene(path)
+            self.changes_made = False
+            self.statusBar.showMessage(f"Сценарий сохранён в {path}", 2000)
+            return True
+        return False
 
     def load_scene(self):
         path, _ = QFileDialog.getOpenFileName(self, "Загрузить сценарий", "", "JSON (*.json)")
         if path:
             self.canvas.load_scene(path)
+            self.changes_made = False
             self.refresh_trajectory_list()
             self.refresh_radar_list()
             self.refresh_launch_list()
+            self.statusBar.showMessage(f"Сценарий загружен из {path}", 2000)
+            
+            
+    # ========== Новый сценарий ==========
+    def on_data_changed(self):
+        self.changes_made = True
+
+    def clear_current_scenario(self):
+        self.canvas.stop_animation()
+        self.canvas.trajectories.clear()
+        self.canvas.radars.clear()
+        self.canvas.launch_pads.clear()
+        self.canvas.active_index = -1
+        self.canvas._recalc_max_time()
+        self.canvas.set_simulation_time(0.0)
+        self.canvas.trajectory_list_changed.emit()
+        self.canvas.radar_list_changed.emit()
+        self.canvas.launchpad_list_changed.emit()
+        self.canvas.update()
+        self.changes_made = False
+        self.statusBar.showMessage("Создан новый сценарий", 2000)
+
+    def prompt_save_changes(self):
+        reply = QMessageBox.question(
+            self, 'Новый сценарий',
+            'У вас есть несохранённые изменения. Сохранить их перед созданием нового сценария?',
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save
+        )
+        if reply == QMessageBox.StandardButton.Save:
+            if self.save_scene():
+                self.clear_current_scenario()
+        elif reply == QMessageBox.StandardButton.Discard:
+            self.clear_current_scenario()
+
+    def create_new_scenario(self):
+        if self.changes_made:
+            self.prompt_save_changes()
+        else:
+            self.clear_current_scenario()
