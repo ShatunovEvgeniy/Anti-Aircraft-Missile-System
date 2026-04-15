@@ -4,17 +4,62 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                              QPushButton, QStatusBar, QSlider, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QInputDialog, QFileDialog,
                              QMenu, QDoubleSpinBox, QToolBar, QTabWidget, QTextEdit,
-                             QGroupBox, QFormLayout, QLineEdit, QSplitter, QMessageBox)
+                             QGroupBox, QFormLayout, QLineEdit, QSplitter, QMessageBox,
+                             QDialog, QDialogButtonBox)
 from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QAction, QPixmap, QIcon, QPainterPath, QPolygonF
 
+from event_logger import EventLogger
 from trajectory import Trajectory
 from radar import Radar
 from launchpad import LaunchPad
 
 
+class ObjectCreationDialog(QDialog):
+    def __init__(self, title, fields, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(460)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Введите имя объекта")
+        form.addRow("Имя:", self.name_edit)
+
+        self.spin_boxes = {}
+        for field in fields:
+            spin = QDoubleSpinBox()
+            spin.setRange(field["min"], field["max"])
+            spin.setValue(field["value"])
+            spin.setDecimals(field.get("decimals", 1))
+            if "suffix" in field:
+                spin.setSuffix(field["suffix"])
+            if "step" in field:
+                spin.setSingleStep(field["step"])
+            form.addRow(field["label"], spin)
+            self.spin_boxes[field["key"]] = spin
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self):
+        data = {"name": self.name_edit.text().strip()}
+        for key, spin in self.spin_boxes.items():
+            data[key] = spin.value()
+        return data
+
+
 class PointCanvas(QWidget):
-    detection_signal = pyqtSignal(str)
+    event_signal = pyqtSignal(str)
     target_detected = pyqtSignal(object, QPointF)  # (trajectory, position)
     radar_list_changed = pyqtSignal()
     trajectory_list_changed = pyqtSignal()
@@ -39,6 +84,7 @@ class PointCanvas(QWidget):
         self.progress_slider = None
 
         self.drawing_mode = "trajectory"  # trajectory, radar, launchpad
+        self.detected_pairs = set()
 
     # ========== Траектории ==========
     def add_trajectory(self, name=None, points=None, speed=200.0, color=None):
@@ -54,12 +100,15 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.trajectory_list_changed.emit()
+        self.event_signal.emit(f"Создана цель {name}")
         self.update()
         return traj
 
     def remove_trajectory(self, idx):
         if 0 <= idx < len(self.trajectories):
+            traj = self.trajectories[idx]
             del self.trajectories[idx]
+            self.detected_pairs = {pair for pair in self.detected_pairs if pair[1] is not traj}
             if self.trajectories:
                 self.active_index = min(idx, len(self.trajectories)-1)
             else:
@@ -68,6 +117,7 @@ class PointCanvas(QWidget):
             self._recalc_max_time()
             self._update_all_positions()
             self.trajectory_list_changed.emit()
+            self.event_signal.emit(f"Удалена цель {traj.name}")
             self.update()
 
     def set_active_trajectory(self, idx):
@@ -86,12 +136,16 @@ class PointCanvas(QWidget):
         radar = Radar(name, center, max_range, view_angle, rot_speed)
         self.radars.append(radar)
         self.radar_list_changed.emit()
+        self.event_signal.emit(f"Создан радар {name} в точке ({center.x():.0f}, {center.y():.0f})")
         self.update()
 
     def remove_radar(self, idx):
         if 0 <= idx < len(self.radars):
+            radar = self.radars[idx]
             del self.radars[idx]
+            self.detected_pairs = {pair for pair in self.detected_pairs if pair[0] is not radar}
             self.radar_list_changed.emit()
+            self.event_signal.emit(f"Удалён радар {radar.name}")
             self.update()
 
     def update_radar(self, idx, name, max_range, view_angle, rot_speed):
@@ -109,12 +163,15 @@ class PointCanvas(QWidget):
         pad = LaunchPad(name, center, missile_speed, launch_range, missile_lifetime)
         self.launch_pads.append(pad)
         self.launchpad_list_changed.emit()
+        self.event_signal.emit(f"Создана пусковая установка {name} в точке ({center.x():.0f}, {center.y():.0f})")
         self.update()
 
     def remove_launch_pad(self, idx):
         if 0 <= idx < len(self.launch_pads):
+            pad = self.launch_pads[idx]
             del self.launch_pads[idx]
             self.launchpad_list_changed.emit()
+            self.event_signal.emit(f"Удалена пусковая установка {pad.name}")
             self.update()
 
     def update_launch_pad(self, idx, name, missile_speed, launch_range, missile_lifetime):
@@ -153,16 +210,38 @@ class PointCanvas(QWidget):
         self.check_detections()
 
     def check_detections(self):
+        current_pairs = set()
         for radar in self.radars:
             for traj in self.trajectories:
                 pos = traj.get_position(self.simulation_time)
                 if pos and radar.contains_point(pos, self.simulation_time):
-                    self.detection_signal.emit(f"Радар \"{radar.name}\" обнаружил объект \"{traj.name}\"")
-                    self.target_detected.emit(traj, pos)
+                    pair = (radar, traj)
+                    current_pairs.add(pair)
+                    if pair not in self.detected_pairs:
+                        self.event_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
+                        self.target_detected.emit(traj, pos)
+        lost_pairs = self.detected_pairs - current_pairs
+        for radar, traj in lost_pairs:
+            if radar in self.radars and traj in self.trajectories:
+                self.event_signal.emit(f"Радар {radar.name} потерял из виду цель {traj.name}")
+        self.detected_pairs = current_pairs
 
     def update_missiles(self, dt):
+        destroyed_any = False
         for pad in self.launch_pads:
-            pad.update_missiles(dt, self.simulation_time, self.radars, self.trajectories)
+            events = pad.update_missiles(dt, self.simulation_time, self.radars, self.trajectories)
+            for event_type, launcher_name, target_name in events:
+                if event_type == "target_destroyed":
+                    destroyed_any = True
+                    self.event_signal.emit(f"Цель {target_name} была сбита установкой {launcher_name}")
+                elif event_type == "missile_expired":
+                    self.event_signal.emit(f"Ракета установки {launcher_name} самоликвидировалась: цель {target_name} потеряна")
+        if destroyed_any:
+            self.detected_pairs = {pair for pair in self.detected_pairs if pair[1] in self.trajectories}
+            if self.active_index >= len(self.trajectories):
+                self.active_index = len(self.trajectories) - 1
+            self._recalc_max_time()
+            self.trajectory_list_changed.emit()
 
     # ========== Анимация и время ==========
     def set_simulation_time(self, t, dt=0):
@@ -177,9 +256,9 @@ class PointCanvas(QWidget):
                 val = 0
             self.progress_slider.setValue(val)
             self.progress_slider.blockSignals(False)
-        # Обновляем ракеты с dt = изменение времени
+        # При перемотке назад ракеты не пересчитываем ретроспективно.
         dt_actual = self.simulation_time - old
-        if dt_actual != 0:
+        if dt_actual > 0:
             self.update_missiles(dt_actual)
         self.update()
         self.check_detections()
@@ -283,26 +362,44 @@ class PointCanvas(QWidget):
                     self._update_all_positions()
 
     def _add_radar_at(self, pos):
-        name, ok = QInputDialog.getText(self, "Новый радар", "Имя:")
-        if not ok or not name: return
-        max_range, ok = QInputDialog.getDouble(self, "Дальность", "Макс. дальность (пикс):", 100, 1, 1000)
-        if not ok: return
-        view_angle, ok = QInputDialog.getDouble(self, "Угол обзора", "Градусы:", 90, 1, 360)
-        if not ok: return
-        rot_speed, ok = QInputDialog.getDouble(self, "Скорость вращения", "град/сек:", 45, 1, 360)
-        if not ok: return
-        self.add_radar(name, pos, max_range, view_angle, rot_speed)
+        dialog = ObjectCreationDialog(
+            "Новый радар",
+            [
+                {"key": "max_range", "label": "Макс. дальность (пикс):", "value": 100, "min": 1, "max": 1000},
+                {"key": "view_angle", "label": "Угол обзора (градусы):", "value": 90, "min": 1, "max": 360},
+                {"key": "rot_speed", "label": "Скорость вращения (град/сек):", "value": 45, "min": 1, "max": 360},
+            ],
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not values["name"]:
+            return
+        self.add_radar(values["name"], pos, values["max_range"], values["view_angle"], values["rot_speed"])
 
     def _add_launchpad_at(self, pos):
-        name, ok = QInputDialog.getText(self, "Новая пусковая установка", "Имя:")
-        if not ok or not name: return
-        missile_speed, ok = QInputDialog.getDouble(self, "Скорость ракеты", "пикс/сек:", 200, 1, 1000)
-        if not ok: return
-        launch_range, ok = QInputDialog.getDouble(self, "Дальность пуска", "пикс:", 200, 1, 1000)
-        if not ok: return
-        missile_lifetime, ok = QInputDialog.getDouble(self, "Время жизни без цели", "сек:", 5, 0.5, 30)
-        if not ok: return
-        self.add_launch_pad(name, pos, missile_speed, launch_range, missile_lifetime)
+        dialog = ObjectCreationDialog(
+            "Новая пусковая установка",
+            [
+                {"key": "missile_speed", "label": "Скорость ракеты (пикс/сек):", "value": 200, "min": 1, "max": 1000},
+                {"key": "launch_range", "label": "Дальность пуска (пикс):", "value": 200, "min": 1, "max": 1000},
+                {"key": "missile_lifetime", "label": "Время жизни без цели (сек):", "value": 5, "min": 0.5, "max": 30, "step": 0.5},
+            ],
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not values["name"]:
+            return
+        self.add_launch_pad(
+            values["name"],
+            pos,
+            values["missile_speed"],
+            values["launch_range"],
+            values["missile_lifetime"],
+        )
 
     # ========== Отрисовка ==========
     def paintEvent(self, event):
@@ -390,6 +487,7 @@ class PointCanvas(QWidget):
         self.trajectories.clear()
         self.radars.clear()
         self.launch_pads.clear()
+        self.detected_pairs.clear()
         for td in data.get("trajectories", []):
             self.trajectories.append(Trajectory.from_dict(td))
         for rd in data.get("radars", []):
@@ -415,8 +513,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Симуляция траекторий, радаров и пусковых установок")
         self.setGeometry(100,100,1300,750)
-        
+
         self.changes_made = False
+        self.logger = EventLogger("logs/simulation.log")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -534,7 +633,7 @@ class MainWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         log_layout.addWidget(self.log_text)
         btn_clear_log = QPushButton("Очистить лог")
-        btn_clear_log.clicked.connect(self.log_text.clear)
+        btn_clear_log.clicked.connect(self.clear_log)
         log_layout.addWidget(btn_clear_log)
         log_group.setLayout(log_layout)
         radar_layout.addWidget(log_group)
@@ -602,7 +701,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusBar)
 
         # Сигналы
-        self.canvas.detection_signal.connect(self.log_detection)
+        self.canvas.event_signal.connect(self.log_event)
         self.canvas.target_detected.connect(self.on_target_detected)
         self.canvas.trajectory_list_changed.connect(self.refresh_trajectory_list)
         self.canvas.radar_list_changed.connect(self.refresh_radar_list)
@@ -764,13 +863,19 @@ class MainWindow(QMainWindow):
                 # Проверяем, не запущена ли уже ракета по этой цели
                 already = any(m.target_traj == traj for m in pad.missiles)
                 if not already:
+                    self.log_event(f"Командный центр отправил команду установке {pad.name} сбить цель {traj.name}")
                     pad.launch_missile(traj, pos, self.canvas.simulation_time)
                     self.statusBar.showMessage(f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'", 2000)
 
     # ========== Лог ==========
-    def log_detection(self, msg):
-        self.log_text.append(msg)
+    def log_event(self, msg):
+        entry = self.logger.log(msg)
+        self.log_text.append(entry)
         self.log_text.ensureCursorVisible()
+
+    def clear_log(self):
+        self.log_text.clear()
+        self.statusBar.showMessage("Лог в окне очищен. Файл логов сохранён.", 2000)
 
     # ========== Сохранение/загрузка ==========
     def save_scene(self):
@@ -802,6 +907,7 @@ class MainWindow(QMainWindow):
         self.canvas.trajectories.clear()
         self.canvas.radars.clear()
         self.canvas.launch_pads.clear()
+        self.canvas.detected_pairs.clear()
         self.canvas.active_index = -1
         self.canvas._recalc_max_time()
         self.canvas.set_simulation_time(0.0)
@@ -810,6 +916,7 @@ class MainWindow(QMainWindow):
         self.canvas.launchpad_list_changed.emit()
         self.canvas.update()
         self.changes_made = False
+        self.log_event("Создан новый сценарий")
         self.statusBar.showMessage("Создан новый сценарий", 2000)
 
     def prompt_save_changes(self):

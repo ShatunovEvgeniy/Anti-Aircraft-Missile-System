@@ -21,10 +21,16 @@ class LaunchPad:
         self.missiles.append(missile)
 
     def update_missiles(self, dt, current_time, radars, trajectories):
+        events = []
         for m in self.missiles[:]:
             m.update(dt, current_time, radars, trajectories)
             if m.is_dead:
+                if m.hit_target:
+                    events.append(("target_destroyed", self.name, m.target_traj.name))
+                elif current_time - m.last_update_time > self.missile_lifetime:
+                    events.append(("missile_expired", self.name, m.target_traj.name))
                 self.missiles.remove(m)
+        return events
 
     def to_dict(self):
         return {
