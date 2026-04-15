@@ -13,6 +13,7 @@ class Trajectory:
         self.total_length = 0.0
         self.speed = speed
         self.travel_time = float('inf')
+        self.is_destroyed = False
         if color is None:
             self.color = QColor(r.randint(0,255), r.randint(0,255), r.randint(0,255))
         else:
@@ -38,7 +39,7 @@ class Trajectory:
             self.travel_time = float('inf')
 
     def get_position(self, sim_time):
-        if not self.points:
+        if self.is_destroyed or not self.points:
             return None
         if sim_time <= 0:
             return QPointF(self.points[0])
@@ -68,6 +69,9 @@ class Trajectory:
     def set_speed(self, speed):
         self.speed = max(0.001, speed)
         self.compute_segments()
+
+    def reset_simulation_state(self):
+        self.is_destroyed = False
 
     def to_dict(self):
         return {

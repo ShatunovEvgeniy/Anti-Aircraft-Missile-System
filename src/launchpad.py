@@ -7,7 +7,10 @@ from missile import Missile
 class LaunchPad:
     def __init__(self, name, center, missile_speed=200.0, launch_range=200.0, missile_lifetime=5.0):
         self.name = name
-        self.center = QPointF(center)
+        if isinstance(center, (list, tuple)) and len(center) >= 2:
+            self.center = QPointF(center[0], center[1])
+        else:
+            self.center = QPointF(center)
         self.missile_speed = missile_speed
         self.launch_range = launch_range
         self.missile_lifetime = missile_lifetime
@@ -25,6 +28,9 @@ class LaunchPad:
             m.update(dt, current_time, radars, trajectories)
             if m.is_dead:
                 self.missiles.remove(m)
+
+    def reset_simulation_state(self):
+        self.missiles.clear()
 
     def to_dict(self):
         return {

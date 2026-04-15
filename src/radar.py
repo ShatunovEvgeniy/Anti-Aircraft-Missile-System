@@ -6,7 +6,10 @@ from PyQt6.QtCore import QPointF
 class Radar:
     def __init__(self, name, center, max_range, view_angle, rot_speed, start_angle=0.0):
         self.name = name
-        self.center = QPointF(center)
+        if isinstance(center, (list, tuple)) and len(center) >= 2:
+            self.center = QPointF(center[0], center[1])
+        else:
+            self.center = QPointF(center)
         self.max_range = max_range
         self.view_angle = view_angle
         self.rotation_speed = rot_speed
