@@ -201,7 +201,6 @@ class PointCanvas(QWidget):
 
     # ========== Анимация и время ==========
     def set_simulation_time(self, t, dt=0):
-        # dt для ракет передаётся отдельно, но мы можем пересчитать из изменения времени
         old = self.simulation_time
         bounded_time = max(0.0, min(t, self.max_time))
         if bounded_time <= 0.0 or bounded_time < old:
@@ -215,7 +214,6 @@ class PointCanvas(QWidget):
                 val = 0
             self.progress_slider.setValue(val)
             self.progress_slider.blockSignals(False)
-        # Обновляем ракеты с dt = изменение времени
         dt_actual = self.simulation_time - old
         if dt_actual > 0:
             self.update_missiles(dt_actual)
@@ -398,7 +396,6 @@ class PointCanvas(QWidget):
         # Ракеты
         for pad in self.launch_pads:
             for m in pad.missiles:
-                # Треугольник
                 angle = 0.0  # можно вычислить по направлению, но для простоты рисуем треугольник вверх
                 size = 8
                 points = [QPointF(m.pos.x(), m.pos.y()-size),
@@ -814,7 +811,6 @@ class MainWindow(QMainWindow):
     def on_target_detected(self, traj, pos):
         for pad in self.canvas.launch_pads:
             if pad.can_launch(pos):
-                # Проверяем, не запущена ли уже ракета по этой цели
                 already = any(m.target_traj == traj for m in pad.missiles)
                 if not already:
                     pad.launch_missile(traj, pos, self.canvas.simulation_time)
