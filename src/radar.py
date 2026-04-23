@@ -15,6 +15,12 @@ class Radar:
         self.rotation_speed = rot_speed
         self.start_angle = start_angle
 
+    def get_distance_to_point(self, point):
+        """Расстояние от радара до точки"""
+        dx = point.x() - self.center.x()
+        dy = point.y() - self.center.y()
+        return math.hypot(dx, dy)
+
     def get_current_angle(self, t):
         return (self.start_angle + self.rotation_speed * t) % 360.0
 
