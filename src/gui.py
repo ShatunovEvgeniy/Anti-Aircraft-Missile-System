@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from event_logger import EventLogger
 from launchpad import LaunchPad
 from radar import Radar
 from simulation_defaults import (
@@ -485,12 +486,18 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.trajectory_list_changed.emit()
+        self.detection_signal.emit(f"Создана цель {name}")
         self.update()
         return traj
 
     def remove_trajectory(self, idx):
         if 0 <= idx < len(self.trajectories):
+            traj = self.trajectories[idx]
+            for radar in self.radars:
+                if radar.tracked_target is traj:
+                    radar.stop_tracking(self.simulation_time)
             del self.trajectories[idx]
+            self._active_detections = {pair for pair in self._active_detections if pair[1] != id(traj)}
             if self.trajectories:
                 self.active_index = min(idx, len(self.trajectories) - 1)
             else:
@@ -499,6 +506,7 @@ class PointCanvas(QWidget):
             self._recalc_max_time()
             self._update_all_positions()
             self.trajectory_list_changed.emit()
+            self.detection_signal.emit(f"Удалена цель {traj.name}")
             self.update()
 
     def set_active_trajectory(self, idx):
@@ -520,15 +528,19 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.radar_list_changed.emit()
+        self.detection_signal.emit(f"Создан радар {name} в точке ({center.x():.0f}, {center.y():.0f})")
         self.update()
 
     def remove_radar(self, idx):
         if 0 <= idx < len(self.radars):
+            radar = self.radars[idx]
             del self.radars[idx]
+            self._active_detections = {pair for pair in self._active_detections if pair[0] != id(radar)}
             self.stop_animation()
             self._recalc_max_time()
             self._update_all_positions()
             self.radar_list_changed.emit()
+            self.detection_signal.emit(f"Удалён радар {radar.name}")
             self.update()
 
     def update_radar(self, idx, name, max_range, view_angle, rot_speed):
@@ -538,6 +550,8 @@ class PointCanvas(QWidget):
             radar.max_range = max_range
             radar.view_angle = view_angle
             radar.rotation_speed = rot_speed
+            if radar.tracked_point is not None and not radar.can_track_point(radar.tracked_point):
+                radar.stop_tracking(self.simulation_time)
             self.stop_animation()
             self._recalc_max_time()
             self._update_all_positions()
@@ -552,15 +566,18 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.launchpad_list_changed.emit()
+        self.detection_signal.emit(f"Создана пусковая установка {name} в точке ({center.x():.0f}, {center.y():.0f})")
         self.update()
 
     def remove_launch_pad(self, idx):
         if 0 <= idx < len(self.launch_pads):
+            pad = self.launch_pads[idx]
             del self.launch_pads[idx]
             self.stop_animation()
             self._recalc_max_time()
             self._update_all_positions()
             self.launchpad_list_changed.emit()
+            self.detection_signal.emit(f"Удалена пусковая установка {pad.name}")
             self.update()
 
     def update_launch_pad(self, idx, name, missile_speed, launch_range, missile_lifetime):
@@ -603,6 +620,8 @@ class PointCanvas(QWidget):
             traj.reset_simulation_state()
         for pad in self.launch_pads:
             pad.reset_simulation_state()
+        for radar in self.radars:
+            radar.stop_tracking(self.simulation_time)
 
     def _update_time_display(self):
         if self.time_label:
@@ -653,6 +672,15 @@ class PointCanvas(QWidget):
 
         active_now = set()
         for radar in self.radars:
+            if radar.tracked_target is not None:
+                traj = radar.tracked_target
+                if not traj.is_destroyed:
+                    pos = traj.get_position(end_time)
+                    if pos and radar.can_track_point(pos):
+                        radar.update_tracking(pos, end_time)
+                        active_now.add((id(radar), id(traj)))
+                        continue
+                radar.stop_tracking(end_time)
             for traj in self.trajectories:
                 if traj.is_destroyed:
                     continue
@@ -665,16 +693,19 @@ class PointCanvas(QWidget):
                 if radar.contains_point_during_interval(pos, start_time, end_time):
                     active_now.add(pair)
                     if pair not in self._active_detections:
-                        distance_world = math.hypot(
-                            pos.x() - radar.center.x(),
-                            pos.y() - radar.center.y(),
-                        )
-                        distance_m = self.world_to_meters_distance(distance_world)
-                        self.detection_signal.emit(
-                            f'Радар "{radar.name}" обнаружил объект "{traj.name}" '
-                            f"на расстоянии {self._format_distance(distance_m)}"
-                        )
+                        radar.start_tracking(traj, pos, end_time)
+                        self.detection_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
                         self.target_detected.emit(traj, pos)
+                    break
+
+        lost_pairs = self._active_detections - active_now
+        if lost_pairs:
+            lost_lookup = {(id(radar), id(traj)): (radar, traj) for radar in self.radars for traj in self.trajectories}
+            for pair in lost_pairs:
+                radar_traj = lost_lookup.get(pair)
+                if radar_traj:
+                    radar, traj = radar_traj
+                    self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель {traj.name}")
 
         self._active_detections = active_now
 
@@ -683,7 +714,14 @@ class PointCanvas(QWidget):
 
     def update_missiles(self, dt):
         for pad in self.launch_pads:
-            pad.update_missiles(dt, self.simulation_time, self.radars, self.trajectories)
+            events = pad.update_missiles(dt, self.simulation_time, self.radars, self.trajectories)
+            for event_type, launcher_name, target_name in events:
+                if event_type == "target_destroyed":
+                    self.detection_signal.emit(f"Цель {target_name} была сбита установкой {launcher_name}")
+                elif event_type == "missile_expired":
+                    self.detection_signal.emit(
+                        f"Ракета установки {launcher_name} самоликвидировалась: цель {target_name} потеряна"
+                    )
 
     # ========== Анимация и время ==========
     def set_simulation_time(self, t, dt=0):
@@ -1050,6 +1088,7 @@ class PointCanvas(QWidget):
         self.trajectories.clear()
         self.radars.clear()
         self.launch_pads.clear()
+        self._active_detections.clear()
         self.remove_background()
 
         self.set_map_scale(data.get("map_scale", METERS_PER_PIXEL), rescale_objects=False)
@@ -1089,6 +1128,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Симуляция траекторий, радаров и пусковых установок")
         self.setGeometry(100, 100, 1500, 820)
         self.changes_made = False
+        self.logger = EventLogger("logs/simulation.log")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -1289,7 +1329,7 @@ class MainWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         log_layout.addWidget(self.log_text)
         btn_clear_log = QPushButton("Очистить лог")
-        btn_clear_log.clicked.connect(self.log_text.clear)
+        btn_clear_log.clicked.connect(self.clear_log)
         log_layout.addWidget(btn_clear_log)
         log_group.setLayout(log_layout)
         radar_layout.addWidget(log_group)
@@ -1586,6 +1626,9 @@ class MainWindow(QMainWindow):
             if pad.can_launch(pos):
                 already = any(missile.target_traj == traj for missile in pad.missiles)
                 if not already:
+                    self.log_detection(
+                        f"Командный центр отправил команду установке {pad.name} сбить цель {traj.name}"
+                    )
                     pad.launch_missile(traj, pos, self.canvas.simulation_time)
                     self.statusBar.showMessage(
                         f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'",
@@ -1594,8 +1637,13 @@ class MainWindow(QMainWindow):
 
     # ========== Лог ==========
     def log_detection(self, msg):
-        self.log_text.append(msg)
+        entry = self.logger.log(msg)
+        self.log_text.append(entry)
         self.log_text.ensureCursorVisible()
+
+    def clear_log(self):
+        self.log_text.clear()
+        self.statusBar.showMessage("Лог в окне очищен. Файл логов сохранён.", 2000)
 
     # ========== Сохранение/загрузка ==========
     def save_scene(self):
