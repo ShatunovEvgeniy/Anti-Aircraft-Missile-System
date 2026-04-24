@@ -23,7 +23,11 @@ class Missile:
             self.is_dead = True
             return
 
-        target_visible = any(r.contains_point(self.target_pos, current_time) for r in radars)
+        previous_time = max(self.creation_time, current_time - dt)
+        target_visible = any(
+            r.contains_point_during_interval(current_target_pos, previous_time, current_time)
+            for r in radars
+        )
         if target_visible:
             self.target_pos = current_target_pos
             self.last_update_time = current_time

@@ -18,17 +18,50 @@ class Radar:
     def get_current_angle(self, t):
         return (self.start_angle + self.rotation_speed * t) % 360.0
 
-    def contains_point(self, point, t):
+    def _point_angle(self, point):
         dx = point.x() - self.center.x()
         dy = point.y() - self.center.y()
-        dist = math.hypot(dx, dy)
-        if dist > self.max_range:
-            return False
-        angle = math.degrees(math.atan2(-dy, dx)) % 360.0
-        current = self.get_current_angle(t)
-        diff = abs(angle - current)
+        return math.degrees(math.atan2(-dy, dx)) % 360.0
+
+    def _point_in_range(self, point):
+        dx = point.x() - self.center.x()
+        dy = point.y() - self.center.y()
+        return math.hypot(dx, dy) <= self.max_range
+
+    def _angle_inside_sector(self, angle, sector_center):
+        diff = abs(angle - sector_center)
         diff = min(diff, 360.0 - diff)
         return diff <= self.view_angle / 2.0
+
+    def contains_point(self, point, t):
+        if not self._point_in_range(point):
+            return False
+        angle = self._point_angle(point)
+        return self._angle_inside_sector(angle, self.get_current_angle(t))
+
+    def contains_point_during_interval(self, point, start_t, end_t):
+        if not self._point_in_range(point):
+            return False
+
+        interval_start = min(start_t, end_t)
+        interval_end = max(start_t, end_t)
+
+        if interval_start == interval_end or self.rotation_speed == 0:
+            return self.contains_point(point, interval_end)
+
+        point_angle = self._point_angle(point)
+        start_angle = self.start_angle + self.rotation_speed * interval_start
+        end_angle = self.start_angle + self.rotation_speed * interval_end
+        sweep_min = min(start_angle, end_angle) - self.view_angle / 2.0
+        sweep_max = max(start_angle, end_angle) + self.view_angle / 2.0
+
+        k_min = math.floor((sweep_min - point_angle) / 360.0) - 1
+        k_max = math.ceil((sweep_max - point_angle) / 360.0) + 1
+        for k in range(k_min, k_max + 1):
+            unwrapped_angle = point_angle + 360.0 * k
+            if sweep_min <= unwrapped_angle <= sweep_max:
+                return True
+        return False
 
     def to_dict(self):
         return {
