@@ -594,6 +594,10 @@ class PointCanvas(QWidget):
                     )
                     # Отложенный вызов для избежания рекурсии
                     QTimer.singleShot(0, lambda t=traj, p=pos: self.target_detected.emit(t, p))
+    
+    # ========== Проверяет, видит ли хотя бы один радар/локатор указанную точку ==========
+    def is_target_visible_by_any_radar(self, pos):
+        return any(radar.contains_point(pos, self.simulation_time) for radar in self.radars)
 
     def update_missiles(self, dt):
         for pad in self.launch_pads:
@@ -804,8 +808,13 @@ class PointCanvas(QWidget):
                 for j in range(1, len(traj.points)):
                     painter.drawLine(traj.points[j - 1], traj.points[j])
             pos = traj.get_position(self.simulation_time)
+            pos = traj.get_position(self.simulation_time)
             if pos:
-                col = QColor(0, 255, 0) if i == self.active_index else QColor(0, 200, 0)
+                if self.is_target_visible_by_any_radar(pos):
+                    col = QColor(255, 0, 0)  # цель обнаружена
+                else:
+                    col = QColor(0, 255, 0) if i == self.active_index else QColor(0, 200, 0)
+
                 painter.setPen(QPen(col, 2 / self.zoom_level))
                 painter.setBrush(QBrush(col))
                 painter.drawEllipse(pos, 6 / self.zoom_level, 6 / self.zoom_level)
@@ -834,10 +843,21 @@ class PointCanvas(QWidget):
 
         # Пусковые установки
         for pad in self.launch_pads:
+            # Радиус действия пусковой
+            painter.setPen(QPen(Qt.GlobalColor.darkMagenta, 1 / self.zoom_level, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(pad.center, pad.launch_range, pad.launch_range)
+
+            # Центр пусковой установки
             painter.setPen(QPen(Qt.GlobalColor.magenta, 2 / self.zoom_level))
             painter.setBrush(QBrush(Qt.GlobalColor.magenta))
             size = 10 / self.zoom_level
-            painter.drawRect(QRectF(pad.center.x() - size / 2, pad.center.y() - size / 2, size, size))
+            painter.drawRect(QRectF(
+                pad.center.x() - size / 2,
+                pad.center.y() - size / 2,
+                size,
+                size
+            ))
 
         # Ракеты
         for pad in self.launch_pads:
