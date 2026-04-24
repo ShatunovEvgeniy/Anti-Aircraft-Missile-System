@@ -12,7 +12,6 @@ class Missile:
         self.creation_time = creation_time
         self.last_update_time = creation_time
         self.is_dead = False
-        self.hit_target = False
 
     def update(self, dt, current_time, radars, trajectories):
         """Обновление состояния ракеты"""
@@ -45,10 +44,7 @@ class Missile:
         dist = math.hypot(dx, dy)
 
         if dist < 5:
-            # Уничтожить цель и ракету
-            if self.target_traj in trajectories:
-                trajectories.remove(self.target_traj)
-            self.hit_target = True
+            self.target_traj.is_destroyed = True
             self.is_dead = True
             return
 
