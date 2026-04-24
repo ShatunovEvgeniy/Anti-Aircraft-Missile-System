@@ -1,0 +1,57 @@
+{
+    "version": 2,
+    "trajectories": [
+        {
+            "name": "Траектория 1",
+            "color": {
+                "r": 97,
+                "g": 87,
+                "b": 30
+            },
+            "speed": 200.0,
+            "points": [
+                [
+                    164,
+                    203
+                ],
+                [
+                    516,
+                    198
+                ],
+                [
+                    696,
+                    437
+                ],
+                [
+                    292,
+                    495
+                ]
+            ]
+        }
+    ],
+    "radars": [
+        {
+            "name": "1",
+            "center": [
+                396.0,
+                283.0
+            ],
+            "max_range": 100.0,
+            "view_angle": 90.0,
+            "rotation_speed": 45.0,
+            "start_angle": 0.0
+        }
+    ],
+    "launchpads": [
+        {
+            "name": "2",
+            "center": [
+                541.0,
+                325.0
+            ],
+            "missile_speed": 200.0,
+            "launch_range": 200.0,
+            "missile_lifetime": 5.0
+        }
+    ]
+}

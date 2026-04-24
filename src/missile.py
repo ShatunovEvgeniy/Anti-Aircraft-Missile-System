@@ -14,6 +14,10 @@ class Missile:
         self.is_dead = False
 
     def update(self, dt, current_time, radars, trajectories):
+        """Обновление состояния ракеты"""
+        if self.is_dead:
+            return
+
         if self.target_traj.is_destroyed:
             self.is_dead = True
             return
@@ -25,8 +29,8 @@ class Missile:
 
         previous_time = max(self.creation_time, current_time - dt)
         target_visible = any(
-            r.contains_point_during_interval(current_target_pos, previous_time, current_time)
-            for r in radars
+            radar.contains_point_during_interval(current_target_pos, previous_time, current_time)
+            for radar in radars
         )
         if target_visible:
             self.target_pos = current_target_pos
@@ -38,6 +42,7 @@ class Missile:
         dx = self.target_pos.x() - self.pos.x()
         dy = self.target_pos.y() - self.pos.y()
         dist = math.hypot(dx, dy)
+
         if dist < 5:
             self.target_traj.is_destroyed = True
             self.is_dead = True
