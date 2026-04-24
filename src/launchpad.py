@@ -32,41 +32,16 @@ class LaunchPad:
 
 
     def update_missiles(self, dt, current_time, radars, trajectories):
-        """Обновление состояния ракет"""
-        # Создаем копию списка для безопасного удаления
-        missiles_copy = self.missiles.copy()
-
-        for missile in missiles_copy:
-            # Проверяем, что ракета еще существует
-            if missile not in self.missiles:
-                continue
-
-            # Обновляем позицию ракеты
-            missile.update(dt, current_time, radars, trajectories)
-
-            # Проверка на уничтожение
-            if missile.is_dead:
-                if missile in self.missiles:
-                    self.missiles.remove(missile)
-                continue
-
-            # Проверка попадания в цель
-            if missile.target_traj and not missile.target_traj.is_destroyed:
-                target_pos = missile.target_traj.get_position(current_time)
-                if target_pos:
-                    # Вычисляем расстояние до цели
-                    dx = missile.pos.x() - target_pos.x()
-                    dy = missile.pos.y() - target_pos.y()
-                    dist = math.hypot(dx, dy)
-                    if dist < 10:
-                        missile.target_traj.is_destroyed = True
-                        missile.is_dead = True
-                        if missile in self.missiles:
-                            self.missiles.remove(missile)
-                        continue
-
-    def reset_simulation_state(self):
-        self.missiles.clear()
+        events = []
+        for m in self.missiles[:]:
+            m.update(dt, current_time, radars, trajectories)
+            if m.is_dead:
+                if m.hit_target:
+                    events.append(("target_destroyed", self.name, m.target_traj.name))
+                elif current_time - m.last_update_time > self.missile_lifetime:
+                    events.append(("missile_expired", self.name, m.target_traj.name))
+                self.missiles.remove(m)
+        return events
 
     def to_dict(self):
         return {
