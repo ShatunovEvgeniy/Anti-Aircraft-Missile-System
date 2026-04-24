@@ -2,7 +2,7 @@ import random as r
 import math
 
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import QPointF, QPoint
+from PyQt6.QtCore import QPointF
 
 
 class Trajectory:
@@ -13,6 +13,7 @@ class Trajectory:
         self.total_length = 0.0
         self.speed = speed
         self.travel_time = float('inf')
+        self.is_destroyed = False
         if color is None:
             self.color = QColor(r.randint(0,255), r.randint(0,255), r.randint(0,255))
         else:
@@ -38,7 +39,7 @@ class Trajectory:
             self.travel_time = float('inf')
 
     def get_position(self, sim_time):
-        if not self.points:
+        if self.is_destroyed or not self.points:
             return None
         if sim_time <= 0:
             return QPointF(self.points[0])
@@ -69,6 +70,9 @@ class Trajectory:
         self.speed = max(0.001, speed)
         self.compute_segments()
 
+    def reset_simulation_state(self):
+        self.is_destroyed = False
+
     def to_dict(self):
         return {
             "name": self.name,
@@ -80,7 +84,7 @@ class Trajectory:
     @classmethod
     def from_dict(cls, d):
         name = d.get("name", "Unknown")
-        points = [QPoint(x,y) for x,y in d.get("points", [])]
+        points = [QPointF(float(x), float(y)) for x, y in d.get("points", [])]
         speed = d.get("speed", 200.0)
         c = d.get("color")
         if c:

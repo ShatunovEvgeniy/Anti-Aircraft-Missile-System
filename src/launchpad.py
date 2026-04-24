@@ -7,11 +7,21 @@ from missile import Missile
 class LaunchPad:
     def __init__(self, name, center, missile_speed=200.0, launch_range=200.0, missile_lifetime=5.0):
         self.name = name
-        self.center = QPointF(center)
+        if isinstance(center, (list, tuple)) and len(center) >= 2:
+            self.center = QPointF(center[0], center[1])
+        else:
+            self.center = QPointF(center)
         self.missile_speed = missile_speed
         self.launch_range = launch_range
         self.missile_lifetime = missile_lifetime
         self.missiles = []
+
+    @staticmethod
+    def get_distance(p1, p2):
+        """Вычисление расстояния между двумя точками"""
+        dx = p1.x() - p2.x()
+        dy = p1.y() - p2.y()
+        return math.hypot(dx, dy)
 
     def can_launch(self, target_pos):
         return math.hypot(target_pos.x()-self.center.x(), target_pos.y()-self.center.y()) <= self.launch_range
@@ -19,6 +29,7 @@ class LaunchPad:
     def launch_missile(self, target_traj, target_pos, current_time):
         missile = Missile(self.center, target_traj, target_pos, self.missile_speed, self.missile_lifetime, current_time)
         self.missiles.append(missile)
+
 
     def update_missiles(self, dt, current_time, radars, trajectories):
         events = []
