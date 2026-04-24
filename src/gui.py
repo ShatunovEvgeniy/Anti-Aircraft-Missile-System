@@ -1,54 +1,124 @@
-import time
 import json
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
-                             QPushButton, QStatusBar, QSlider, QHBoxLayout, QLabel,
-                             QListWidget, QListWidgetItem, QInputDialog, QFileDialog,
-                             QMenu, QDoubleSpinBox, QToolBar, QTabWidget, QTextEdit,
-                             QGroupBox, QFormLayout, QLineEdit, QSplitter, QMessageBox)
+import math
+import os
+import time
+
 from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QAction, QPixmap, QIcon, QPainterPath, QPolygonF
+from PyQt6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSplitter,
+    QStatusBar,
+    QTabWidget,
+    QTextEdit,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
-from trajectory import Trajectory
-from radar import Radar
 from launchpad import LaunchPad
+from radar import Radar
 from simulation_defaults import (
     ANIMATION_INTERVAL_MS,
     DEFAULT_LAUNCHPAD_NAME,
-    DEFAULT_LAUNCH_RANGE,
     DEFAULT_MISSILE_LIFETIME,
-    DEFAULT_MISSILE_SPEED,
+    DEFAULT_MISSILE_RANGE_M,
+    DEFAULT_MISSILE_SPEED_MPS,
     DEFAULT_PLAYBACK_SPEED,
     DEFAULT_RADAR_NAME,
-    DEFAULT_RADAR_RANGE,
+    DEFAULT_RADAR_RANGE_M,
     DEFAULT_RADAR_ROTATION_SPEED,
     DEFAULT_RADAR_VIEW_ANGLE,
     DEFAULT_TARGET_NAME,
-    DEFAULT_TRAJECTORY_SPEED,
+    DEFAULT_TARGET_SPEED_MPS,
     MAX_SIMULATION_DURATION_S,
+    METERS_PER_PIXEL,
 )
+from trajectory import Trajectory
+
+
+class ScaleDialog(QDialog):
+    def __init__(self, current_scale=METERS_PER_PIXEL, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Масштаб карты")
+
+        layout = QFormLayout(self)
+
+        self.scale_spin = QDoubleSpinBox()
+        self.scale_spin.setRange(0.1, 100000.0)
+        self.scale_spin.setDecimals(2)
+        self.scale_spin.setValue(current_scale)
+        self.scale_spin.setSuffix(" м/пикс")
+        layout.addRow("Масштаб:", self.scale_spin)
+
+        info_label = QLabel("Пример: 500 м/пикс -> 1 км = 2 пикселя")
+        info_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addRow(info_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def get_scale(self):
+        return self.scale_spin.value()
 
 
 class PointCanvas(QWidget):
     detection_signal = pyqtSignal(str)
-    target_detected = pyqtSignal(object, QPointF)  # (trajectory, position)
+    target_detected = pyqtSignal(object, QPointF)
     radar_list_changed = pyqtSignal()
     trajectory_list_changed = pyqtSignal()
     launchpad_list_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(400,300)
+        self.setMinimumSize(700, 500)
         self.setStyleSheet("background-color: white;")
+        self.setMouseTracking(True)
+
+        self.zoom_level = 1.0
+        self.min_zoom = 0.3
+        self.max_zoom = 5.0
+        self.zoom_factor = 1.1
+        self.view_offset = QPointF(0.0, 0.0)
+        self.drag_start = None
+
+        self.map_scale = METERS_PER_PIXEL
+        self.show_grid = True
+        self.grid_color = QColor(200, 200, 200)
+        self.last_scale_bar_values = None
+        self.last_scale_bar_data = None
 
         self.trajectories = []
         self.active_index = -1
         self.radars = []
         self.launch_pads = []
+        self._active_detections = set()
 
         self.simulation_time = 0.0
         self.auto_max_time = 0.0
         self.max_time = 0.0
         self.simulation_duration_override = 0.0
+
         self.animation_timer = QTimer()
         self.animation_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.animation_timer.timeout.connect(self.update_animation)
@@ -58,21 +128,359 @@ class PointCanvas(QWidget):
         self.time_label = None
         self.playback_speed = DEFAULT_PLAYBACK_SPEED
 
-        self.drawing_mode = "trajectory"  # trajectory, radar, launchpad
+        self.drawing_mode = "trajectory"
+
+        self.background_image = None
+        self.background_opacity = 0.7
+        self.background_path = None
+
+    # ========== Конвертация единиц ==========
+    def meters_to_world_distance(self, distance_m):
+        return distance_m / self.map_scale
+
+    def world_to_meters_distance(self, distance_world):
+        return distance_world * self.map_scale
+
+    def mps_to_world_speed(self, speed_mps):
+        return speed_mps / self.map_scale
+
+    def world_to_mps_speed(self, speed_world):
+        return speed_world * self.map_scale
+
+    def _format_distance(self, distance_m):
+        if distance_m >= 1000:
+            return f"{distance_m / 1000:.1f} км"
+        return f"{distance_m:.0f} м"
+
+    # ========== Масштаб и навигация ==========
+    def zoom_in(self):
+        new_zoom = min(self.zoom_level * self.zoom_factor, self.max_zoom)
+        if new_zoom == self.zoom_level:
+            return
+        center = QPointF(self.width() / 2, self.height() / 2)
+        self.view_offset = center - (center - self.view_offset) * (new_zoom / self.zoom_level)
+        self.zoom_level = new_zoom
+        self.last_scale_bar_values = None
+        self.update()
+
+    def zoom_out(self):
+        new_zoom = max(self.zoom_level / self.zoom_factor, self.min_zoom)
+        if new_zoom == self.zoom_level:
+            return
+        center = QPointF(self.width() / 2, self.height() / 2)
+        self.view_offset = center - (center - self.view_offset) * (new_zoom / self.zoom_level)
+        self.zoom_level = new_zoom
+        self.last_scale_bar_values = None
+        self.update()
+
+    def reset_view(self):
+        self.zoom_level = 1.0
+        self.view_offset = QPointF(0.0, 0.0)
+        self.last_scale_bar_values = None
+        self.update()
+
+    def world_to_screen(self, point):
+        return QPointF(
+            point.x() * self.zoom_level + self.view_offset.x(),
+            point.y() * self.zoom_level + self.view_offset.y(),
+        )
+
+    def screen_to_world(self, point):
+        return QPointF(
+            (point.x() - self.view_offset.x()) / self.zoom_level,
+            (point.y() - self.view_offset.y()) / self.zoom_level,
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.last_scale_bar_values = None
+        self.update()
+
+    def wheelEvent(self, event):
+        cursor_pos = event.position()
+        world_pos_before = self.screen_to_world(cursor_pos)
+
+        if event.angleDelta().y() > 0:
+            new_zoom = min(self.zoom_level * self.zoom_factor, self.max_zoom)
+        else:
+            new_zoom = max(self.zoom_level / self.zoom_factor, self.min_zoom)
+
+        if new_zoom == self.zoom_level:
+            return
+
+        self.zoom_level = new_zoom
+        world_pos_after = self.screen_to_world(cursor_pos)
+        self.view_offset += (world_pos_after - world_pos_before) * self.zoom_level
+        self.last_scale_bar_values = None
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_start is not None:
+            delta = event.position() - self.drag_start
+            self.view_offset += delta
+            self.drag_start = event.position()
+            self.last_scale_bar_values = None
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.drag_start = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def set_map_scale(self, meters_per_pixel, rescale_objects=True):
+        new_scale = max(0.1, meters_per_pixel)
+        old_scale = self.map_scale
+        if math.isclose(old_scale, new_scale):
+            return
+
+        if rescale_objects and old_scale > 0:
+            scale_factor = old_scale / new_scale
+            for traj in self.trajectories:
+                traj.speed *= scale_factor
+                traj.compute_segments()
+            for radar in self.radars:
+                radar.max_range *= scale_factor
+            for pad in self.launch_pads:
+                pad.launch_range *= scale_factor
+                pad.missile_speed *= scale_factor
+                for missile in pad.missiles:
+                    missile.speed *= scale_factor
+
+        self.map_scale = new_scale
+        self.last_scale_bar_values = None
+        self._recalc_max_time()
+        self.update()
+        self._show_status(f"Масштаб карты: 1 пиксель = {self.map_scale:.1f} м")
+
+    def toggle_grid(self):
+        self.show_grid = not self.show_grid
+        self.update()
+
+    def draw_grid(self, painter):
+        if not self.show_grid or self.zoom_level <= 0:
+            self.draw_scale_bar(painter)
+            return
+
+        top_left = self.screen_to_world(QPointF(0, 0))
+        bottom_right = self.screen_to_world(QPointF(self.width(), self.height()))
+        screen_width_m = max(0.0, (bottom_right.x() - top_left.x()) * self.map_scale)
+
+        if screen_width_m > 0:
+            optimal_spacing_m = screen_width_m / 8.0
+            magnitude = 10 ** int(math.log10(max(optimal_spacing_m, 1.0)))
+            first_digit = optimal_spacing_m / magnitude
+            if first_digit < 2:
+                grid_spacing_m = magnitude
+            elif first_digit < 5:
+                grid_spacing_m = 2 * magnitude
+            else:
+                grid_spacing_m = 5 * magnitude
+        else:
+            grid_spacing_m = 1000.0
+
+        grid_spacing_world = grid_spacing_m / self.map_scale
+        if grid_spacing_world <= 0:
+            self.draw_scale_bar(painter)
+            return
+
+        show_labels = (grid_spacing_world * self.zoom_level) >= 40
+
+        painter.setPen(QPen(self.grid_color, 1, Qt.PenStyle.SolidLine))
+        painter.setOpacity(0.25)
+
+        start_x = math.floor(top_left.x() / grid_spacing_world) * grid_spacing_world
+        start_y = math.floor(top_left.y() / grid_spacing_world) * grid_spacing_world
+
+        x = start_x
+        while x <= bottom_right.x():
+            screen_x = self.world_to_screen(QPointF(x, 0)).x()
+            painter.drawLine(int(screen_x), 0, int(screen_x), self.height())
+            x += grid_spacing_world
+
+        y = start_y
+        while y <= bottom_right.y():
+            screen_y = self.world_to_screen(QPointF(0, y)).y()
+            painter.drawLine(0, int(screen_y), self.width(), int(screen_y))
+            y += grid_spacing_world
+
+        painter.setOpacity(1.0)
+
+        if show_labels:
+            font = painter.font()
+            font.setPointSize(11)
+            font.setBold(True)
+            painter.setFont(font)
+
+            x = start_x
+            while x <= bottom_right.x():
+                screen_x = self.world_to_screen(QPointF(x, 0)).x()
+                label = self._format_distance(abs(self.world_to_meters_distance(x)))
+                for offset_x, offset_y in [
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, -1),
+                    (0, 1),
+                    (1, -1),
+                    (1, 0),
+                    (1, 1),
+                ]:
+                    painter.setPen(QPen(Qt.GlobalColor.black, 1))
+                    painter.drawText(int(screen_x) + 5 + offset_x, 18 + offset_y, label)
+                painter.setPen(QPen(Qt.GlobalColor.white, 1))
+                painter.drawText(int(screen_x) + 5, 18, label)
+                x += grid_spacing_world
+
+            y = start_y
+            while y <= bottom_right.y():
+                screen_y = self.world_to_screen(QPointF(0, y)).y()
+                label = self._format_distance(abs(self.world_to_meters_distance(y)))
+                for offset_x, offset_y in [
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, -1),
+                    (0, 1),
+                    (1, -1),
+                    (1, 0),
+                    (1, 1),
+                ]:
+                    painter.setPen(QPen(Qt.GlobalColor.black, 1))
+                    painter.drawText(5 + offset_x, int(screen_y) - 5 + offset_y, label)
+                painter.setPen(QPen(Qt.GlobalColor.white, 1))
+                painter.drawText(5, int(screen_y) - 5, label)
+                y += grid_spacing_world
+
+        self.draw_scale_bar(painter)
+
+    def draw_scale_bar(self, painter):
+        current_values = (self.map_scale, self.zoom_level, self.width(), self.height())
+        if self.last_scale_bar_values != current_values:
+            bar_length_pixels = 150.0
+            bar_length_meters = bar_length_pixels * self.map_scale / self.zoom_level
+
+            if bar_length_meters >= 1000:
+                if bar_length_meters >= 10000:
+                    display_value = round(bar_length_meters / 1000)
+                else:
+                    display_value = round(bar_length_meters / 1000, 1)
+                unit = "км"
+                bar_length_meters_display = display_value * 1000
+            else:
+                if bar_length_meters >= 100:
+                    display_value = round(bar_length_meters / 100) * 100
+                elif bar_length_meters >= 10:
+                    display_value = round(bar_length_meters / 10) * 10
+                else:
+                    display_value = max(1, round(bar_length_meters))
+                unit = "м"
+                bar_length_meters_display = display_value
+
+            bar_length_pixels_display = bar_length_meters_display * self.zoom_level / self.map_scale
+
+            self.last_scale_bar_values = current_values
+            self.last_scale_bar_data = {
+                "x": 20,
+                "y": self.height() - 30,
+                "length": bar_length_pixels_display,
+                "display_value": display_value,
+                "unit": unit,
+            }
+
+        if not self.last_scale_bar_data:
+            return
+
+        data = self.last_scale_bar_data
+        x = data["x"]
+        y = self.height() - 30
+        data["y"] = y
+        length = data["length"]
+        display_value = data["display_value"]
+        unit = data["unit"]
+
+        painter.setOpacity(1.0)
+        painter.setPen(QPen(Qt.GlobalColor.white, 3))
+        painter.drawLine(int(x), int(y), int(x + length), int(y))
+        painter.drawLine(int(x), int(y - 8), int(x), int(y + 8))
+        painter.drawLine(int(x + length), int(y - 8), int(x + length), int(y + 8))
+        if length > 40:
+            mid_x = int(x + length / 2)
+            painter.drawLine(mid_x, int(y - 5), mid_x, int(y + 5))
+
+        painter.setPen(QPen(Qt.GlobalColor.black, 1))
+        painter.drawLine(int(x), int(y), int(x + length), int(y))
+        painter.drawLine(int(x), int(y - 8), int(x), int(y + 8))
+        painter.drawLine(int(x + length), int(y - 8), int(x + length), int(y + 8))
+        if length > 40:
+            mid_x = int(x + length / 2)
+            painter.drawLine(mid_x, int(y - 5), mid_x, int(y + 5))
+
+        font = painter.font()
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+
+        text = f"{display_value} {unit}"
+        text_rect = painter.boundingRect(0, 0, 0, 0, Qt.TextFlag.TextSingleLine, text)
+        text_x = int(x + length / 2 - text_rect.width() / 2)
+
+        for offset_x, offset_y in [
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (0, -1),
+            (0, 1),
+            (1, -1),
+            (1, 0),
+            (1, 1),
+        ]:
+            painter.setPen(QPen(Qt.GlobalColor.black, 2))
+            painter.drawText(text_x + offset_x, int(y - 10) + offset_y, text)
+
+        painter.setPen(QPen(Qt.GlobalColor.white, 1))
+        painter.drawText(text_x, int(y - 10), text)
+
+    # ========== Карта ==========
+    def set_background_image(self, image_path, opacity=0.7):
+        if image_path and os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                self._show_status(f"Не удалось загрузить изображение: {image_path}")
+                return False
+            self.background_image = pixmap
+            self.background_opacity = max(0.0, min(1.0, opacity))
+            self.background_path = image_path
+            self.update()
+            self._show_status(f"Фоновое изображение загружено: {os.path.basename(image_path)}")
+            return True
+        self._show_status(f"Не удалось загрузить изображение: {image_path}")
+        return False
+
+    def remove_background(self):
+        self.background_image = None
+        self.background_path = None
+        self.update()
+        self._show_status("Фоновое изображение удалено")
+
+    def set_background_opacity(self, opacity):
+        self.background_opacity = max(0.0, min(1.0, opacity))
+        self.update()
 
     # ========== Траектории ==========
-    def add_trajectory(self, name=None, points=None, speed=DEFAULT_TRAJECTORY_SPEED, color=None):
+    def add_trajectory(self, name=None, points=None, speed=None, color=None):
         if name is None:
             if self.trajectories:
                 name = f"{DEFAULT_TARGET_NAME} {len(self.trajectories)+1}"
             else:
                 name = DEFAULT_TARGET_NAME
+        if speed is None:
+            speed = self.mps_to_world_speed(DEFAULT_TARGET_SPEED_MPS)
         traj = Trajectory(name, color, speed)
         if points:
             traj.points = points
             traj.compute_segments()
         self.trajectories.append(traj)
-        self.active_index = len(self.trajectories)-1
+        self.active_index = len(self.trajectories) - 1
         self.stop_animation()
         self._recalc_max_time()
         self._update_all_positions()
@@ -84,7 +492,7 @@ class PointCanvas(QWidget):
         if 0 <= idx < len(self.trajectories):
             del self.trajectories[idx]
             if self.trajectories:
-                self.active_index = min(idx, len(self.trajectories)-1)
+                self.active_index = min(idx, len(self.trajectories) - 1)
             else:
                 self.active_index = -1
             self.stop_animation()
@@ -97,9 +505,9 @@ class PointCanvas(QWidget):
         if 0 <= idx < len(self.trajectories):
             self.active_index = idx
 
-    def set_trajectory_speed(self, idx, speed):
+    def set_trajectory_speed(self, idx, speed_world):
         if 0 <= idx < len(self.trajectories):
-            self.trajectories[idx].set_speed(speed)
+            self.trajectories[idx].set_speed(speed_world)
             self._recalc_max_time()
             self._update_all_positions()
             self.update()
@@ -108,22 +516,31 @@ class PointCanvas(QWidget):
     def add_radar(self, name, center, max_range, view_angle, rot_speed):
         radar = Radar(name, center, max_range, view_angle, rot_speed)
         self.radars.append(radar)
+        self.stop_animation()
+        self._recalc_max_time()
+        self._update_all_positions()
         self.radar_list_changed.emit()
         self.update()
 
     def remove_radar(self, idx):
         if 0 <= idx < len(self.radars):
             del self.radars[idx]
+            self.stop_animation()
+            self._recalc_max_time()
+            self._update_all_positions()
             self.radar_list_changed.emit()
             self.update()
 
     def update_radar(self, idx, name, max_range, view_angle, rot_speed):
         if 0 <= idx < len(self.radars):
-            r = self.radars[idx]
-            r.name = name
-            r.max_range = max_range
-            r.view_angle = view_angle
-            r.rotation_speed = rot_speed
+            radar = self.radars[idx]
+            radar.name = name
+            radar.max_range = max_range
+            radar.view_angle = view_angle
+            radar.rotation_speed = rot_speed
+            self.stop_animation()
+            self._recalc_max_time()
+            self._update_all_positions()
             self.radar_list_changed.emit()
             self.update()
 
@@ -131,32 +548,41 @@ class PointCanvas(QWidget):
     def add_launch_pad(self, name, center, missile_speed, launch_range, missile_lifetime):
         pad = LaunchPad(name, center, missile_speed, launch_range, missile_lifetime)
         self.launch_pads.append(pad)
+        self.stop_animation()
+        self._recalc_max_time()
+        self._update_all_positions()
         self.launchpad_list_changed.emit()
         self.update()
 
     def remove_launch_pad(self, idx):
         if 0 <= idx < len(self.launch_pads):
             del self.launch_pads[idx]
+            self.stop_animation()
+            self._recalc_max_time()
+            self._update_all_positions()
             self.launchpad_list_changed.emit()
             self.update()
 
     def update_launch_pad(self, idx, name, missile_speed, launch_range, missile_lifetime):
         if 0 <= idx < len(self.launch_pads):
-            p = self.launch_pads[idx]
-            p.name = name
-            p.missile_speed = missile_speed
-            p.launch_range = launch_range
-            p.missile_lifetime = missile_lifetime
+            pad = self.launch_pads[idx]
+            pad.name = name
+            pad.missile_speed = missile_speed
+            pad.launch_range = launch_range
+            pad.missile_lifetime = missile_lifetime
+            self.stop_animation()
+            self._recalc_max_time()
+            self._update_all_positions()
             self.launchpad_list_changed.emit()
             self.update()
 
     # ========== Обновления ==========
     def _get_auto_max_time(self):
-        trajectory_times = [t.travel_time for t in self.trajectories if t.travel_time != float('inf')]
+        trajectory_times = [t.travel_time for t in self.trajectories if t.travel_time != float("inf")]
         base_time = max(trajectory_times) if trajectory_times else 0.0
 
         radar_buffer = 0.0
-        radar_periods = [360.0 / r.rotation_speed for r in self.radars if r.rotation_speed > 0]
+        radar_periods = [360.0 / radar.rotation_speed for radar in self.radars if radar.rotation_speed > 0]
         if radar_periods:
             radar_buffer = max(radar_periods)
 
@@ -172,6 +598,7 @@ class PointCanvas(QWidget):
         return base_time + radar_buffer + missile_buffer
 
     def _reset_simulation_entities(self):
+        self._active_detections.clear()
         for traj in self.trajectories:
             traj.reset_simulation_state()
         for pad in self.launch_pads:
@@ -191,10 +618,14 @@ class PointCanvas(QWidget):
 
     def _recalc_max_time(self):
         self.auto_max_time = self._get_auto_max_time()
-        self.max_time = self.simulation_duration_override if self.simulation_duration_override > 0 else self.auto_max_time
+        self.max_time = (
+            self.simulation_duration_override
+            if self.simulation_duration_override > 0
+            else self.auto_max_time
+        )
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
-            self.progress_slider.setRange(0, int(self.max_time*1000) if self.max_time>0 else 1000)
+            self.progress_slider.setRange(0, int(self.max_time * 1000) if self.max_time > 0 else 1000)
             self.progress_slider.blockSignals(False)
             if self.simulation_time > self.max_time:
                 self.set_simulation_time(self.max_time)
@@ -205,10 +636,10 @@ class PointCanvas(QWidget):
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             if self.max_time > 0:
-                val = int(self.simulation_time / self.max_time * self.progress_slider.maximum())
+                value = int(self.simulation_time / self.max_time * self.progress_slider.maximum())
             else:
-                val = 0
-            self.progress_slider.setValue(val)
+                value = 0
+            self.progress_slider.setValue(value)
             self.progress_slider.blockSignals(False)
         self._update_time_display()
         self.update()
@@ -219,14 +650,36 @@ class PointCanvas(QWidget):
             start_time = self.simulation_time
         if end_time is None:
             end_time = self.simulation_time
+
+        active_now = set()
         for radar in self.radars:
             for traj in self.trajectories:
                 if traj.is_destroyed:
                     continue
+
                 pos = traj.get_position(end_time)
-                if pos and radar.contains_point_during_interval(pos, start_time, end_time):
-                    self.detection_signal.emit(f"Радар \"{radar.name}\" обнаружил объект \"{traj.name}\"")
-                    self.target_detected.emit(traj, pos)
+                if not pos:
+                    continue
+
+                pair = (id(radar), id(traj))
+                if radar.contains_point_during_interval(pos, start_time, end_time):
+                    active_now.add(pair)
+                    if pair not in self._active_detections:
+                        distance_world = math.hypot(
+                            pos.x() - radar.center.x(),
+                            pos.y() - radar.center.y(),
+                        )
+                        distance_m = self.world_to_meters_distance(distance_world)
+                        self.detection_signal.emit(
+                            f'Радар "{radar.name}" обнаружил объект "{traj.name}" '
+                            f"на расстоянии {self._format_distance(distance_m)}"
+                        )
+                        self.target_detected.emit(traj, pos)
+
+        self._active_detections = active_now
+
+    def is_target_visible_by_any_radar(self, pos):
+        return any(radar.contains_point(pos, self.simulation_time) for radar in self.radars)
 
     def update_missiles(self, dt):
         for pad in self.launch_pads:
@@ -242,13 +695,12 @@ class PointCanvas(QWidget):
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             if self.max_time > 0:
-                val = int(self.simulation_time / self.max_time * self.progress_slider.maximum())
+                value = int(self.simulation_time / self.max_time * self.progress_slider.maximum())
             else:
-                val = 0
-            self.progress_slider.setValue(val)
+                value = 0
+            self.progress_slider.setValue(value)
             self.progress_slider.blockSignals(False)
         self._update_time_display()
-        # Обновляем ракеты с dt = изменение времени
         dt_actual = self.simulation_time - old
         if dt_actual > 0:
             self.update_missiles(dt_actual)
@@ -264,7 +716,7 @@ class PointCanvas(QWidget):
         self.set_simulation_time(0.0)
 
     def start_animation(self):
-        if len(self.trajectories)==0 or not any(len(t.points)>=2 for t in self.trajectories):
+        if len(self.trajectories) == 0 or not any(len(traj.points) >= 2 for traj in self.trajectories):
             self._show_status("Нет готовых траекторий")
             return
         if self.max_time <= 0:
@@ -323,10 +775,10 @@ class PointCanvas(QWidget):
         if self.is_animating:
             self.stop_animation()
         if self.max_time > 0:
-            t = value / self.progress_slider.maximum() * self.max_time
+            sim_time = value / self.progress_slider.maximum() * self.max_time
         else:
-            t = 0.0
-        self.set_simulation_time(t)
+            sim_time = 0.0
+        self.set_simulation_time(sim_time)
 
     def clear_active_points(self):
         if self.active_index >= 0:
@@ -337,20 +789,28 @@ class PointCanvas(QWidget):
 
     # ========== Мышь ==========
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.drag_start = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+
         if self.is_animating:
             return
+
+        world_pos = self.screen_to_world(event.position())
+
         if self.drawing_mode == "radar" and event.button() == Qt.MouseButton.LeftButton:
-            self._add_radar_at(event.pos())
+            self._add_radar_at(world_pos)
             return
         if self.drawing_mode == "launchpad" and event.button() == Qt.MouseButton.LeftButton:
-            self._add_launchpad_at(event.pos())
+            self._add_launchpad_at(world_pos)
             return
         if self.drawing_mode == "trajectory":
             if event.button() == Qt.MouseButton.LeftButton:
                 if self.active_index < 0:
                     return
                 traj = self.trajectories[self.active_index]
-                traj.points.append(event.pos())
+                traj.points.append(world_pos)
                 traj.compute_segments()
                 self._recalc_max_time()
                 self.update()
@@ -368,117 +828,247 @@ class PointCanvas(QWidget):
 
     def _add_radar_at(self, pos):
         name, ok = QInputDialog.getText(self, "Новый радар", "Имя:", text=DEFAULT_RADAR_NAME)
-        if not ok or not name: return
-        max_range, ok = QInputDialog.getDouble(self, "Дальность", "Макс. дальность (пикс):", DEFAULT_RADAR_RANGE, 1, 1000, 1)
-        if not ok: return
-        view_angle, ok = QInputDialog.getDouble(self, "Угол обзора", "Градусы:", DEFAULT_RADAR_VIEW_ANGLE, 1, 360, 1)
-        if not ok: return
-        rot_speed, ok = QInputDialog.getDouble(self, "Скорость вращения", "град/сек:", DEFAULT_RADAR_ROTATION_SPEED, 1, 360, 1)
-        if not ok: return
-        self.add_radar(name, pos, max_range, view_angle, rot_speed)
+        if not ok or not name:
+            return
+        max_range_m, ok = QInputDialog.getDouble(
+            self,
+            "Дальность",
+            "Макс. дальность (метры):",
+            DEFAULT_RADAR_RANGE_M,
+            1.0,
+            2000000.0,
+            1,
+        )
+        if not ok:
+            return
+        view_angle, ok = QInputDialog.getDouble(
+            self,
+            "Угол обзора",
+            "Градусы:",
+            DEFAULT_RADAR_VIEW_ANGLE,
+            1.0,
+            360.0,
+            1,
+        )
+        if not ok:
+            return
+        rot_speed, ok = QInputDialog.getDouble(
+            self,
+            "Скорость вращения",
+            "град/сек:",
+            DEFAULT_RADAR_ROTATION_SPEED,
+            0.1,
+            360.0,
+            1,
+        )
+        if not ok:
+            return
+        self.add_radar(name, pos, self.meters_to_world_distance(max_range_m), view_angle, rot_speed)
 
     def _add_launchpad_at(self, pos):
-        name, ok = QInputDialog.getText(self, "Новая пусковая установка", "Имя:", text=DEFAULT_LAUNCHPAD_NAME)
-        if not ok or not name: return
-        missile_speed, ok = QInputDialog.getDouble(self, "Скорость ракеты", "пикс/сек:", DEFAULT_MISSILE_SPEED, 1, 1000, 2)
-        if not ok: return
-        launch_range, ok = QInputDialog.getDouble(self, "Дальность пуска", "пикс:", DEFAULT_LAUNCH_RANGE, 1, 1000, 1)
-        if not ok: return
-        missile_lifetime, ok = QInputDialog.getDouble(self, "Время жизни без цели", "сек:", DEFAULT_MISSILE_LIFETIME, 0.5, 30, 1)
-        if not ok: return
-        self.add_launch_pad(name, pos, missile_speed, launch_range, missile_lifetime)
+        name, ok = QInputDialog.getText(
+            self,
+            "Новая пусковая установка",
+            "Имя:",
+            text=DEFAULT_LAUNCHPAD_NAME,
+        )
+        if not ok or not name:
+            return
+        missile_speed_mps, ok = QInputDialog.getDouble(
+            self,
+            "Скорость ракеты",
+            "м/с:",
+            DEFAULT_MISSILE_SPEED_MPS,
+            1.0,
+            10000.0,
+            1,
+        )
+        if not ok:
+            return
+        launch_range_m, ok = QInputDialog.getDouble(
+            self,
+            "Дальность пуска",
+            "метры:",
+            DEFAULT_MISSILE_RANGE_M,
+            1.0,
+            1000000.0,
+            1,
+        )
+        if not ok:
+            return
+        missile_lifetime, ok = QInputDialog.getDouble(
+            self,
+            "Время жизни без цели",
+            "сек:",
+            DEFAULT_MISSILE_LIFETIME,
+            0.5,
+            3600.0,
+            1,
+        )
+        if not ok:
+            return
+        self.add_launch_pad(
+            name,
+            pos,
+            self.mps_to_world_speed(missile_speed_mps),
+            self.meters_to_world_distance(launch_range_m),
+            missile_lifetime,
+        )
 
     # ========== Отрисовка ==========
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Траектории
-        for i, traj in enumerate(self.trajectories):
+        painter.save()
+        painter.translate(self.view_offset)
+        painter.scale(self.zoom_level, self.zoom_level)
+
+        if self.background_image and not self.background_image.isNull():
+            painter.setOpacity(self.background_opacity)
+            painter.drawPixmap(0, 0, self.background_image)
+            painter.setOpacity(1.0)
+
+        painter.restore()
+        self.draw_grid(painter)
+
+        painter.save()
+        painter.translate(self.view_offset)
+        painter.scale(self.zoom_level, self.zoom_level)
+
+        for index, traj in enumerate(self.trajectories):
             if traj.points:
-                painter.setPen(QPen(traj.color, 1))
+                painter.setPen(QPen(traj.color, 1 / self.zoom_level))
                 painter.setBrush(QBrush(traj.color))
-                for p in traj.points:
-                    painter.drawEllipse(p, 5,5)
-                for j in range(1,len(traj.points)):
-                    painter.drawLine(traj.points[j-1], traj.points[j])
+                for point in traj.points:
+                    painter.drawEllipse(point, 5 / self.zoom_level, 5 / self.zoom_level)
+                for point_index in range(1, len(traj.points)):
+                    painter.drawLine(traj.points[point_index - 1], traj.points[point_index])
+
             pos = traj.get_position(self.simulation_time)
             if pos:
-                col = QColor(0,255,0) if i==self.active_index else QColor(0,200,0)
-                painter.setPen(QPen(col,2))
-                painter.setBrush(QBrush(col))
-                painter.drawEllipse(pos, 6,6)
+                if self.is_target_visible_by_any_radar(pos):
+                    color = QColor(255, 0, 0)
+                else:
+                    color = QColor(0, 255, 0) if index == self.active_index else QColor(0, 200, 0)
+                painter.setPen(QPen(color, 2 / self.zoom_level))
+                painter.setBrush(QBrush(color))
+                painter.drawEllipse(pos, 6 / self.zoom_level, 6 / self.zoom_level)
 
-        # Радары
         for radar in self.radars:
-            painter.setPen(QPen(Qt.GlobalColor.blue,2))
+            painter.setPen(QPen(Qt.GlobalColor.blue, 2 / self.zoom_level))
             painter.setBrush(QBrush(Qt.GlobalColor.blue))
-            painter.drawEllipse(radar.center, 5,5)
-            painter.setPen(QPen(Qt.GlobalColor.darkBlue,1, Qt.PenStyle.DashLine))
+            painter.drawEllipse(radar.center, 5 / self.zoom_level, 5 / self.zoom_level)
+            painter.setPen(
+                QPen(Qt.GlobalColor.darkBlue, 1 / self.zoom_level, Qt.PenStyle.DashLine)
+            )
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(radar.center, radar.max_range, radar.max_range)
-            cur_angle = radar.get_current_angle(self.simulation_time)
-            half = radar.view_angle/2.0
-            start = cur_angle - half
+
+            current_angle = radar.get_current_angle(self.simulation_time)
+            half = radar.view_angle / 2.0
+            start = current_angle - half
             path = QPainterPath()
             path.moveTo(radar.center)
-            rect = QRectF(radar.center.x()-radar.max_range, radar.center.y()-radar.max_range, 2*radar.max_range, 2*radar.max_range)
+            rect = QRectF(
+                radar.center.x() - radar.max_range,
+                radar.center.y() - radar.max_range,
+                2 * radar.max_range,
+                2 * radar.max_range,
+            )
             path.arcTo(rect, start, radar.view_angle)
             path.closeSubpath()
-            painter.fillPath(path, QColor(255,255,0,80))
-            painter.setPen(QPen(Qt.GlobalColor.yellow,1))
+            painter.fillPath(path, QColor(255, 255, 0, 80))
+            painter.setPen(QPen(Qt.GlobalColor.yellow, 1 / self.zoom_level))
             painter.drawPath(path)
 
-        # Пусковые установки
         for pad in self.launch_pads:
-            painter.setPen(QPen(Qt.GlobalColor.magenta,2))
-            painter.setBrush(QBrush(Qt.GlobalColor.magenta))
-            painter.drawRect(QRectF(pad.center.x()-10, pad.center.y()-10, 20,20))
+            painter.setPen(
+                QPen(Qt.GlobalColor.darkMagenta, 1 / self.zoom_level, Qt.PenStyle.DashLine)
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(pad.center, pad.launch_range, pad.launch_range)
 
-        # Ракеты
+            painter.setPen(QPen(Qt.GlobalColor.magenta, 2 / self.zoom_level))
+            painter.setBrush(QBrush(Qt.GlobalColor.magenta))
+            size = 10 / self.zoom_level
+            painter.drawRect(
+                QRectF(
+                    pad.center.x() - size / 2,
+                    pad.center.y() - size / 2,
+                    size,
+                    size,
+                )
+            )
+
         for pad in self.launch_pads:
-            for m in pad.missiles:
-                angle = 0.0  # можно вычислить по направлению, но для простоты рисуем треугольник вверх
-                size = 8
-                points = [QPointF(m.pos.x(), m.pos.y()-size),
-                          QPointF(m.pos.x()-size*0.7, m.pos.y()+size*0.5),
-                          QPointF(m.pos.x()+size*0.7, m.pos.y()+size*0.5)]
-                painter.setBrush(QBrush(QColor(255,165,0)))
-                painter.setPen(QPen(Qt.GlobalColor.black,1))
+            for missile in pad.missiles:
+                size = 8 / self.zoom_level
+                points = [
+                    QPointF(missile.pos.x(), missile.pos.y() - size),
+                    QPointF(missile.pos.x() - size * 0.7, missile.pos.y() + size * 0.5),
+                    QPointF(missile.pos.x() + size * 0.7, missile.pos.y() + size * 0.5),
+                ]
+                painter.setBrush(QBrush(QColor(255, 165, 0)))
+                painter.setPen(QPen(Qt.GlobalColor.black, 1 / self.zoom_level))
                 painter.drawPolygon(QPolygonF(points))
+
+        painter.restore()
 
     # ========== Сохранение/загрузка сценария ==========
     def save_scene(self, path):
         data = {
-            "version": 2,
-            "trajectories": [t.to_dict() for t in self.trajectories],
-            "radars": [r.to_dict() for r in self.radars],
-            "launchpads": [p.to_dict() for p in self.launch_pads]
+            "version": 3,
+            "map_scale": self.map_scale,
+            "show_grid": self.show_grid,
+            "background": {
+                "path": self.background_path,
+                "opacity": self.background_opacity,
+            }
+            if self.background_path
+            else None,
+            "trajectories": [traj.to_dict() for traj in self.trajectories],
+            "radars": [radar.to_dict() for radar in self.radars],
+            "launchpads": [pad.to_dict() for pad in self.launch_pads],
         }
         try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=4)
             self._show_status(f"Сценарий сохранён в {path}")
-        except Exception as e:
-            self._show_status(f"Ошибка сохранения: {e}")
+        except Exception as error:
+            self._show_status(f"Ошибка сохранения: {error}")
 
     def load_scene(self, path):
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            self._show_status(f"Ошибка загрузки: {e}")
+            with open(path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        except Exception as error:
+            self._show_status(f"Ошибка загрузки: {error}")
             return
+
         self.stop_animation()
         self.trajectories.clear()
         self.radars.clear()
         self.launch_pads.clear()
-        for td in data.get("trajectories", []):
-            self.trajectories.append(Trajectory.from_dict(td))
-        for rd in data.get("radars", []):
-            self.radars.append(Radar.from_dict(rd))
-        for pd in data.get("launchpads", []):
-            self.launch_pads.append(LaunchPad.from_dict(pd))
+        self.remove_background()
+
+        self.set_map_scale(data.get("map_scale", METERS_PER_PIXEL), rescale_objects=False)
+        self.show_grid = data.get("show_grid", True)
+
+        for trajectory_data in data.get("trajectories", []):
+            self.trajectories.append(Trajectory.from_dict(trajectory_data))
+        for radar_data in data.get("radars", []):
+            self.radars.append(Radar.from_dict(radar_data))
+        for launchpad_data in data.get("launchpads", []):
+            self.launch_pads.append(LaunchPad.from_dict(launchpad_data))
+
+        background_data = data.get("background")
+        if background_data and background_data.get("path"):
+            self.set_background_image(
+                background_data.get("path"),
+                background_data.get("opacity", 0.7),
+            )
+
         self.active_index = 0 if self.trajectories else -1
         self._recalc_max_time()
         self.set_simulation_time(0.0)
@@ -489,7 +1079,7 @@ class PointCanvas(QWidget):
         self._show_status(f"Сценарий загружен из {path}")
 
     def _show_status(self, msg):
-        if self.parent() and hasattr(self.parent(), 'statusBar'):
+        if self.parent() and hasattr(self.parent(), "statusBar"):
             self.parent().statusBar.showMessage(msg, 2000)
 
 
@@ -497,71 +1087,121 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Симуляция траекторий, радаров и пусковых установок")
-        self.setGeometry(100,100,1300,750)
+        self.setGeometry(100, 100, 1500, 820)
         self.changes_made = False
 
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
 
-        # Верхняя панель
         top = QWidget()
         top_layout = QHBoxLayout(top)
-        top_layout.setContentsMargins(0,0,0,0)
+        top_layout.setContentsMargins(0, 0, 0, 0)
 
         self.canvas = PointCanvas(self)
 
-        self.reset_btn = QPushButton("Сбросить все")
+        view_group = QWidget()
+        view_layout = QHBoxLayout(view_group)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+
+        zoom_in_btn = QPushButton("+")
+        zoom_in_btn.setFixedSize(32, 28)
+        zoom_in_btn.setToolTip("Приблизить")
+        zoom_in_btn.clicked.connect(self.canvas.zoom_in)
+        view_layout.addWidget(zoom_in_btn)
+
+        zoom_out_btn = QPushButton("-")
+        zoom_out_btn.setFixedSize(32, 28)
+        zoom_out_btn.setToolTip("Отдалить")
+        zoom_out_btn.clicked.connect(self.canvas.zoom_out)
+        view_layout.addWidget(zoom_out_btn)
+
+        reset_view_btn = QPushButton("Сброс вида")
+        reset_view_btn.clicked.connect(self.canvas.reset_view)
+        view_layout.addWidget(reset_view_btn)
+
+        self.zoom_label = QLabel("Масштаб: 100%")
+        view_layout.addWidget(self.zoom_label)
+        top_layout.addWidget(view_group)
+
+        top_layout.addWidget(QLabel("|"))
+
+        scale_group = QWidget()
+        scale_layout = QHBoxLayout(scale_group)
+        scale_layout.setContentsMargins(0, 0, 0, 0)
+        scale_layout.addWidget(QLabel("Масштаб карты:"))
+
+        self.scale_spin = QDoubleSpinBox()
+        self.scale_spin.setRange(0.1, 100000.0)
+        self.scale_spin.setDecimals(1)
+        self.scale_spin.setValue(METERS_PER_PIXEL)
+        self.scale_spin.setSuffix(" м/пикс")
+        self.scale_spin.setToolTip("Сколько метров соответствует одному пикселю карты")
+        self.scale_spin.valueChanged.connect(self.on_scale_changed)
+        scale_layout.addWidget(self.scale_spin)
+        top_layout.addWidget(scale_group)
+
+        top_layout.addWidget(QLabel("|"))
+
+        sim_group = QWidget()
+        sim_layout = QHBoxLayout(sim_group)
+        sim_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.reset_btn = QPushButton("Сбросить всё")
         self.reset_btn.clicked.connect(self.canvas.reset_all)
-        top_layout.addWidget(self.reset_btn)
+        sim_layout.addWidget(self.reset_btn)
 
         self.sim_btn = QPushButton("Симулировать")
         self.sim_btn.clicked.connect(self.canvas.simulate)
-        top_layout.addWidget(self.sim_btn)
+        sim_layout.addWidget(self.sim_btn)
 
-        top_layout.addWidget(QLabel("Лимит симуляции (с):"))
+        sim_layout.addWidget(QLabel("Лимит (с):"))
         self.duration_spin = QDoubleSpinBox()
         self.duration_spin.setRange(0, MAX_SIMULATION_DURATION_S)
         self.duration_spin.setDecimals(1)
         self.duration_spin.setSingleStep(10.0)
         self.duration_spin.setSpecialValueText("Авто")
-        self.duration_spin.setToolTip("0 = авто по сцене. Любое значение больше 0 задаёт точную длительность симуляции в секундах.")
+        self.duration_spin.setToolTip(
+            "0 = авто по сцене. Любое значение больше 0 задаёт точную длительность симуляции."
+        )
         self.duration_spin.setValue(0.0)
         self.duration_spin.valueChanged.connect(self.canvas.set_simulation_duration_override)
-        top_layout.addWidget(self.duration_spin)
+        sim_layout.addWidget(self.duration_spin)
 
-        top_layout.addWidget(QLabel("Скорость:"))
+        sim_layout.addWidget(QLabel("Скорость:"))
         self.playback_speed_spin = QDoubleSpinBox()
         self.playback_speed_spin.setRange(0.1, 100.0)
         self.playback_speed_spin.setDecimals(1)
         self.playback_speed_spin.setSingleStep(1.0)
         self.playback_speed_spin.setSuffix("x")
         self.playback_speed_spin.setValue(DEFAULT_PLAYBACK_SPEED)
-        self.playback_speed_spin.setToolTip("Во сколько раз быстрее идёт симуляционное время относительно реального времени.")
+        self.playback_speed_spin.setToolTip(
+            "Во сколько раз быстрее идёт симуляционное время относительно реального."
+        )
         self.playback_speed_spin.valueChanged.connect(self.canvas.set_playback_speed)
-        top_layout.addWidget(self.playback_speed_spin)
+        sim_layout.addWidget(self.playback_speed_spin)
+        top_layout.addWidget(sim_group)
 
-        top_layout.addWidget(QLabel("Текущее время (с):"))
+        top_layout.addWidget(QLabel("Время:"))
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0,1000)
+        self.slider.setRange(0, 1000)
         self.slider.setValue(0)
         self.slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.slider.setToolTip("Временная шкала")
         top_layout.addWidget(self.slider)
+
         self.time_value_label = QLabel("0.0 / 0.0 c")
         self.time_value_label.setMinimumWidth(110)
         top_layout.addWidget(self.time_value_label)
 
         main_layout.addWidget(top)
 
-        # Горизонтальный сплиттер
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.canvas)
 
-        # Вкладки
         tabs = QTabWidget()
         tabs.setMaximumWidth(380)
 
-        # --- Траектории ---
         traj_widget = QWidget()
         traj_layout = QVBoxLayout(traj_widget)
 
@@ -586,10 +1226,11 @@ class MainWindow(QMainWindow):
 
         grp_speed = QGroupBox("Параметры активной траектории")
         speed_layout = QHBoxLayout()
-        speed_layout.addWidget(QLabel("Скорость (пкс/с):"))
+        speed_layout.addWidget(QLabel("Скорость (м/с):"))
         self.speed_spin = QDoubleSpinBox()
-        self.speed_spin.setRange(0.1,10000)
-        self.speed_spin.setValue(DEFAULT_TRAJECTORY_SPEED)
+        self.speed_spin.setRange(0.1, 10000.0)
+        self.speed_spin.setDecimals(1)
+        self.speed_spin.setValue(DEFAULT_TARGET_SPEED_MPS)
         speed_layout.addWidget(self.speed_spin)
         btn_apply_speed = QPushButton("Применить")
         btn_apply_speed.clicked.connect(self.apply_speed)
@@ -599,7 +1240,6 @@ class MainWindow(QMainWindow):
 
         tabs.addTab(traj_widget, "Траектории")
 
-        # --- Радары ---
         radar_widget = QWidget()
         radar_layout = QVBoxLayout(radar_widget)
 
@@ -619,13 +1259,18 @@ class MainWindow(QMainWindow):
         self.radar_name = QLineEdit()
         self.radar_name.setPlaceholderText(DEFAULT_RADAR_NAME)
         self.radar_range = QDoubleSpinBox()
-        self.radar_range.setRange(1,1000)
-        self.radar_range.setValue(DEFAULT_RADAR_RANGE)
+        self.radar_range.setRange(1.0, 2000000.0)
+        self.radar_range.setDecimals(1)
+        self.radar_range.setSuffix(" м")
+        self.radar_range.setValue(DEFAULT_RADAR_RANGE_M)
         self.radar_angle = QDoubleSpinBox()
-        self.radar_angle.setRange(1,360)
+        self.radar_angle.setRange(1.0, 360.0)
+        self.radar_angle.setDecimals(1)
+        self.radar_angle.setSuffix(" °")
         self.radar_angle.setValue(DEFAULT_RADAR_VIEW_ANGLE)
         self.radar_speed = QDoubleSpinBox()
-        self.radar_speed.setRange(1,360)
+        self.radar_speed.setRange(0.1, 360.0)
+        self.radar_speed.setDecimals(1)
         self.radar_speed.setValue(DEFAULT_RADAR_ROTATION_SPEED)
         self.radar_speed.setSuffix(" °/с")
         btn_apply_radar = QPushButton("Применить")
@@ -638,7 +1283,6 @@ class MainWindow(QMainWindow):
         grp_radar.setLayout(form_radar)
         radar_layout.addWidget(grp_radar)
 
-        # Лог
         log_group = QGroupBox("Лог обнаружений")
         log_layout = QVBoxLayout()
         self.log_text = QTextEdit()
@@ -652,7 +1296,6 @@ class MainWindow(QMainWindow):
 
         tabs.addTab(radar_widget, "Радары")
 
-        # --- Пусковые установки ---
         launch_widget = QWidget()
         launch_layout = QVBoxLayout(launch_widget)
 
@@ -672,20 +1315,26 @@ class MainWindow(QMainWindow):
         self.launch_name = QLineEdit()
         self.launch_name.setPlaceholderText(DEFAULT_LAUNCHPAD_NAME)
         self.launch_missile_speed = QDoubleSpinBox()
-        self.launch_missile_speed.setRange(1,1000)
-        self.launch_missile_speed.setValue(DEFAULT_MISSILE_SPEED)
+        self.launch_missile_speed.setRange(1.0, 10000.0)
+        self.launch_missile_speed.setDecimals(1)
+        self.launch_missile_speed.setValue(DEFAULT_MISSILE_SPEED_MPS)
+        self.launch_missile_speed.setSuffix(" м/с")
         self.launch_range = QDoubleSpinBox()
-        self.launch_range.setRange(1,1000)
-        self.launch_range.setValue(DEFAULT_LAUNCH_RANGE)
+        self.launch_range.setRange(1.0, 1000000.0)
+        self.launch_range.setDecimals(1)
+        self.launch_range.setValue(DEFAULT_MISSILE_RANGE_M)
+        self.launch_range.setSuffix(" м")
         self.launch_lifetime = QDoubleSpinBox()
-        self.launch_lifetime.setRange(0.5,30)
+        self.launch_lifetime.setRange(0.5, 3600.0)
+        self.launch_lifetime.setDecimals(1)
         self.launch_lifetime.setValue(DEFAULT_MISSILE_LIFETIME)
+        self.launch_lifetime.setSuffix(" с")
         btn_apply_launch = QPushButton("Применить")
         btn_apply_launch.clicked.connect(self.apply_launch)
         form_launch.addRow("Имя:", self.launch_name)
-        form_launch.addRow("Скорость ракеты (пкс/с):", self.launch_missile_speed)
-        form_launch.addRow("Дальность пуска (пикс):", self.launch_range)
-        form_launch.addRow("Время жизни без цели (с):", self.launch_lifetime)
+        form_launch.addRow("Скорость ракеты:", self.launch_missile_speed)
+        form_launch.addRow("Дальность пуска:", self.launch_range)
+        form_launch.addRow("Время жизни:", self.launch_lifetime)
         form_launch.addRow(btn_apply_launch)
         grp_launch.setLayout(form_launch)
         launch_layout.addWidget(grp_launch)
@@ -693,27 +1342,38 @@ class MainWindow(QMainWindow):
         tabs.addTab(launch_widget, "Пусковые установки")
 
         splitter.addWidget(tabs)
-        splitter.setSizes([850,400])
+        splitter.setSizes([950, 420])
         main_layout.addWidget(splitter)
 
-        # Панель инструментов
         toolbar = QToolBar("Файл")
         self.addToolBar(toolbar)
         toolbar.setMovable(False)
-        btn_save = QPushButton("Сохранить сценарий")
+
+        btn_save = QPushButton("Сохранить")
         btn_save.clicked.connect(self.save_scene)
         toolbar.addWidget(btn_save)
-        btn_load = QPushButton("Загрузить сценарий")
+
+        btn_load = QPushButton("Загрузить")
         btn_load.clicked.connect(self.load_scene)
         toolbar.addWidget(btn_load)
+
         btn_new = QPushButton("Новый сценарий")
         btn_new.clicked.connect(self.create_new_scenario)
         toolbar.addWidget(btn_new)
 
+        toolbar.addSeparator()
+
+        btn_set_bg = QPushButton("Установить фон")
+        btn_set_bg.clicked.connect(self.set_background)
+        toolbar.addWidget(btn_set_bg)
+
+        btn_remove_bg = QPushButton("Удалить фон")
+        btn_remove_bg.clicked.connect(self.remove_background)
+        toolbar.addWidget(btn_remove_bg)
+
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
 
-        # Сигналы
         self.canvas.detection_signal.connect(self.log_detection)
         self.canvas.target_detected.connect(self.on_target_detected)
         self.canvas.trajectory_list_changed.connect(self.refresh_trajectory_list)
@@ -723,12 +1383,25 @@ class MainWindow(QMainWindow):
         self.canvas.radar_list_changed.connect(self.on_data_changed)
         self.canvas.launchpad_list_changed.connect(self.on_data_changed)
 
-        # Инициализация
         self.canvas.add_trajectory(DEFAULT_TARGET_NAME)
         self.canvas.set_progress_slider(self.slider)
         self.canvas.set_time_label(self.time_value_label)
 
-        # Переключение режимов по вкладкам
+        zoom_in_action = QAction("Zoom In", self)
+        zoom_in_action.setShortcut("Ctrl++")
+        zoom_in_action.triggered.connect(self.canvas.zoom_in)
+        self.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("Zoom Out", self)
+        zoom_out_action.setShortcut("Ctrl+-")
+        zoom_out_action.triggered.connect(self.canvas.zoom_out)
+        self.addAction(zoom_out_action)
+
+        reset_view_action = QAction("Reset View", self)
+        reset_view_action.setShortcut("Ctrl+0")
+        reset_view_action.triggered.connect(self.canvas.reset_view)
+        self.addAction(reset_view_action)
+
         tabs.currentChanged.connect(self.on_tab_changed)
 
         self.refresh_trajectory_list()
@@ -736,43 +1409,56 @@ class MainWindow(QMainWindow):
         self.refresh_launch_list()
         self.on_tab_changed(0)
 
-        self.statusBar.showMessage("Готово. Режим: Траектория. ЛКМ — точка, ПКМ — удалить.")
+        self.zoom_update_timer = QTimer()
+        self.zoom_update_timer.timeout.connect(self.update_zoom_display)
+        self.zoom_update_timer.start(100)
+
+        self.statusBar.showMessage(
+            "Готово. Колесо мыши — масштаб, средняя кнопка — перемещение карты."
+        )
 
     # ========== Обработчики вкладок ==========
     def on_tab_changed(self, idx):
         if idx == 0:
             self.canvas.drawing_mode = "trajectory"
-            self.statusBar.showMessage("Режим: Траектория. ЛКМ — точка, ПКМ — удалить.")
+            self.statusBar.showMessage(
+                "Режим: Траектория. ЛКМ — точка, ПКМ — удалить. Средняя кнопка — перемещение карты."
+            )
         elif idx == 1:
             self.canvas.drawing_mode = "radar"
             self.statusBar.showMessage("Режим: Радар. ЛКМ — установить радар.")
         else:
             self.canvas.drawing_mode = "launchpad"
-            self.statusBar.showMessage("Режим: Пусковая установка. ЛКМ — установить пусковую установку.")
+            self.statusBar.showMessage("Режим: Пусковая установка. ЛКМ — установить пусковую.")
 
     # ========== Траектории ==========
     def refresh_trajectory_list(self):
         self.traj_list.clear()
-        for i, t in enumerate(self.canvas.trajectories):
-            pix = QPixmap(16,16)
-            pix.fill(t.color)
-            icon = QIcon(pix)
-            item = QListWidgetItem(icon, f"{t.name} (скорость: {t.speed:.2f})")
-            item.setData(Qt.ItemDataRole.UserRole, i)
+        for index, traj in enumerate(self.canvas.trajectories):
+            pixmap = QPixmap(16, 16)
+            pixmap.fill(traj.color)
+            icon = QIcon(pixmap)
+            speed_mps = self.canvas.world_to_mps_speed(traj.speed)
+            item = QListWidgetItem(icon, f"{traj.name} (скорость: {speed_mps:.0f} м/с)")
+            item.setData(Qt.ItemDataRole.UserRole, index)
             self.traj_list.addItem(item)
         if self.canvas.active_index >= 0:
             self.traj_list.setCurrentRow(self.canvas.active_index)
-            self.speed_spin.setValue(self.canvas.trajectories[self.canvas.active_index].speed)
+            speed_mps = self.canvas.world_to_mps_speed(
+                self.canvas.trajectories[self.canvas.active_index].speed
+            )
+            self.speed_spin.setValue(speed_mps)
 
     def on_trajectory_selected(self, item):
         idx = item.data(Qt.ItemDataRole.UserRole)
         self.canvas.set_active_trajectory(idx)
-        self.speed_spin.setValue(self.canvas.trajectories[idx].speed)
+        self.speed_spin.setValue(self.canvas.world_to_mps_speed(self.canvas.trajectories[idx].speed))
         self.refresh_trajectory_list()
 
     def show_trajectory_menu(self, pos):
         item = self.traj_list.itemAt(pos)
-        if not item: return
+        if not item:
+            return
         idx = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu()
         act_rename = QAction("Переименовать", self)
@@ -784,102 +1470,127 @@ class MainWindow(QMainWindow):
         menu.exec(self.traj_list.mapToGlobal(pos))
 
     def add_trajectory(self):
-        default_name = f"{DEFAULT_TARGET_NAME} {len(self.canvas.trajectories)+1}" if self.canvas.trajectories else DEFAULT_TARGET_NAME
+        default_name = (
+            f"{DEFAULT_TARGET_NAME} {len(self.canvas.trajectories)+1}"
+            if self.canvas.trajectories
+            else DEFAULT_TARGET_NAME
+        )
         name, ok = QInputDialog.getText(self, "Новая траектория", "Имя:", text=default_name)
         if not ok:
             name = None
         self.canvas.add_trajectory(name)
 
     def remove_trajectory(self):
-        cur = self.traj_list.currentRow()
-        if cur >= 0:
-            self.canvas.remove_trajectory(cur)
+        current = self.traj_list.currentRow()
+        if current >= 0:
+            self.canvas.remove_trajectory(current)
 
     def rename_trajectory(self, item):
         idx = item.data(Qt.ItemDataRole.UserRole)
-        t = self.canvas.trajectories[idx]
-        new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое имя:", text=t.name)
+        traj = self.canvas.trajectories[idx]
+        new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое имя:", text=traj.name)
         if ok and new_name:
-            t.name = new_name
+            traj.name = new_name
             self.refresh_trajectory_list()
 
     def apply_speed(self):
         if self.canvas.active_index >= 0:
-            self.canvas.set_trajectory_speed(self.canvas.active_index, self.speed_spin.value())
+            self.canvas.set_trajectory_speed(
+                self.canvas.active_index,
+                self.canvas.mps_to_world_speed(self.speed_spin.value()),
+            )
             self.refresh_trajectory_list()
 
     # ========== Радары ==========
     def refresh_radar_list(self):
         self.radar_list.clear()
-        for i, r in enumerate(self.canvas.radars):
-            item = QListWidgetItem(f"{r.name} (R={r.max_range}, α={r.view_angle}°)")
-            item.setData(Qt.ItemDataRole.UserRole, i)
+        for index, radar in enumerate(self.canvas.radars):
+            range_km = self.canvas.world_to_meters_distance(radar.max_range) / 1000.0
+            item = QListWidgetItem(f"{radar.name} (R={range_km:.0f} км, α={radar.view_angle:.1f}°)")
+            item.setData(Qt.ItemDataRole.UserRole, index)
             self.radar_list.addItem(item)
 
     def on_radar_selected(self, item):
         idx = item.data(Qt.ItemDataRole.UserRole)
-        r = self.canvas.radars[idx]
-        self.radar_name.setText(r.name)
-        self.radar_range.setValue(r.max_range)
-        self.radar_angle.setValue(r.view_angle)
-        self.radar_speed.setValue(r.rotation_speed)
+        radar = self.canvas.radars[idx]
+        self.radar_name.setText(radar.name)
+        self.radar_range.setValue(self.canvas.world_to_meters_distance(radar.max_range))
+        self.radar_angle.setValue(radar.view_angle)
+        self.radar_speed.setValue(radar.rotation_speed)
 
     def remove_radar(self):
-        cur = self.radar_list.currentRow()
-        if cur >= 0:
-            self.canvas.remove_radar(cur)
+        current = self.radar_list.currentRow()
+        if current >= 0:
+            self.canvas.remove_radar(current)
             self.radar_name.clear()
-            self.radar_range.setValue(DEFAULT_RADAR_RANGE)
+            self.radar_range.setValue(DEFAULT_RADAR_RANGE_M)
             self.radar_angle.setValue(DEFAULT_RADAR_VIEW_ANGLE)
             self.radar_speed.setValue(DEFAULT_RADAR_ROTATION_SPEED)
 
     def apply_radar(self):
-        cur = self.radar_list.currentRow()
-        if cur >= 0:
+        current = self.radar_list.currentRow()
+        if current >= 0:
             name = self.radar_name.text() or DEFAULT_RADAR_NAME
-            self.canvas.update_radar(cur, name, self.radar_range.value(), self.radar_angle.value(), self.radar_speed.value())
+            self.canvas.update_radar(
+                current,
+                name,
+                self.canvas.meters_to_world_distance(self.radar_range.value()),
+                self.radar_angle.value(),
+                self.radar_speed.value(),
+            )
             self.refresh_radar_list()
 
     # ========== Пусковые установки ==========
     def refresh_launch_list(self):
         self.launch_list.clear()
-        for i, p in enumerate(self.canvas.launch_pads):
-            item = QListWidgetItem(f"{p.name} (R={p.launch_range}, v={p.missile_speed})")
-            item.setData(Qt.ItemDataRole.UserRole, i)
+        for index, pad in enumerate(self.canvas.launch_pads):
+            range_km = self.canvas.world_to_meters_distance(pad.launch_range) / 1000.0
+            speed_mps = self.canvas.world_to_mps_speed(pad.missile_speed)
+            item = QListWidgetItem(f"{pad.name} (R={range_km:.0f} км, v={speed_mps:.0f} м/с)")
+            item.setData(Qt.ItemDataRole.UserRole, index)
             self.launch_list.addItem(item)
 
     def on_launch_selected(self, item):
         idx = item.data(Qt.ItemDataRole.UserRole)
-        p = self.canvas.launch_pads[idx]
-        self.launch_name.setText(p.name)
-        self.launch_missile_speed.setValue(p.missile_speed)
-        self.launch_range.setValue(p.launch_range)
-        self.launch_lifetime.setValue(p.missile_lifetime)
+        pad = self.canvas.launch_pads[idx]
+        self.launch_name.setText(pad.name)
+        self.launch_missile_speed.setValue(self.canvas.world_to_mps_speed(pad.missile_speed))
+        self.launch_range.setValue(self.canvas.world_to_meters_distance(pad.launch_range))
+        self.launch_lifetime.setValue(pad.missile_lifetime)
 
     def remove_launch(self):
-        cur = self.launch_list.currentRow()
-        if cur >= 0:
-            self.canvas.remove_launch_pad(cur)
+        current = self.launch_list.currentRow()
+        if current >= 0:
+            self.canvas.remove_launch_pad(current)
             self.launch_name.clear()
-            self.launch_missile_speed.setValue(DEFAULT_MISSILE_SPEED)
-            self.launch_range.setValue(DEFAULT_LAUNCH_RANGE)
+            self.launch_missile_speed.setValue(DEFAULT_MISSILE_SPEED_MPS)
+            self.launch_range.setValue(DEFAULT_MISSILE_RANGE_M)
             self.launch_lifetime.setValue(DEFAULT_MISSILE_LIFETIME)
 
     def apply_launch(self):
-        cur = self.launch_list.currentRow()
-        if cur >= 0:
+        current = self.launch_list.currentRow()
+        if current >= 0:
             name = self.launch_name.text() or DEFAULT_LAUNCHPAD_NAME
-            self.canvas.update_launch_pad(cur, name, self.launch_missile_speed.value(), self.launch_range.value(), self.launch_lifetime.value())
+            self.canvas.update_launch_pad(
+                current,
+                name,
+                self.canvas.mps_to_world_speed(self.launch_missile_speed.value()),
+                self.canvas.meters_to_world_distance(self.launch_range.value()),
+                self.launch_lifetime.value(),
+            )
             self.refresh_launch_list()
 
     # ========== Обнаружение целей и запуск ракет ==========
     def on_target_detected(self, traj, pos):
         for pad in self.canvas.launch_pads:
             if pad.can_launch(pos):
-                already = any(m.target_traj == traj for m in pad.missiles)
+                already = any(missile.target_traj == traj for missile in pad.missiles)
                 if not already:
                     pad.launch_missile(traj, pos, self.canvas.simulation_time)
-                    self.statusBar.showMessage(f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'", 2000)
+                    self.statusBar.showMessage(
+                        f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'",
+                        2000,
+                    )
 
     # ========== Лог ==========
     def log_detection(self, msg):
@@ -901,6 +1612,9 @@ class MainWindow(QMainWindow):
         if path:
             self.canvas.load_scene(path)
             self.changes_made = False
+            self.scale_spin.blockSignals(True)
+            self.scale_spin.setValue(self.canvas.map_scale)
+            self.scale_spin.blockSignals(False)
             self.refresh_trajectory_list()
             self.refresh_radar_list()
             self.refresh_launch_list()
@@ -916,6 +1630,11 @@ class MainWindow(QMainWindow):
         self.canvas.radars.clear()
         self.canvas.launch_pads.clear()
         self.canvas.active_index = -1
+        self.canvas.remove_background()
+        self.canvas.set_map_scale(METERS_PER_PIXEL, rescale_objects=False)
+        self.scale_spin.blockSignals(True)
+        self.scale_spin.setValue(METERS_PER_PIXEL)
+        self.scale_spin.blockSignals(False)
         self.canvas._recalc_max_time()
         self.canvas.set_simulation_time(0.0)
         self.canvas.trajectory_list_changed.emit()
@@ -930,8 +1649,10 @@ class MainWindow(QMainWindow):
             self,
             "Новый сценарий",
             "У вас есть несохранённые изменения. Сохранить их перед созданием нового сценария?",
-            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
         )
         if reply == QMessageBox.StandardButton.Save:
             if self.save_scene():
@@ -944,3 +1665,52 @@ class MainWindow(QMainWindow):
             self.prompt_save_changes()
         else:
             self.clear_current_scenario()
+
+    # ========== Масштаб ==========
+    def on_scale_changed(self, value):
+        self.canvas.set_map_scale(value)
+        self.refresh_trajectory_list()
+        self.refresh_radar_list()
+        self.refresh_launch_list()
+
+        if self.canvas.active_index >= 0:
+            self.speed_spin.setValue(
+                self.canvas.world_to_mps_speed(self.canvas.trajectories[self.canvas.active_index].speed)
+            )
+        radar_row = self.radar_list.currentRow()
+        if radar_row >= 0 and radar_row < len(self.canvas.radars):
+            radar = self.canvas.radars[radar_row]
+            self.radar_range.setValue(self.canvas.world_to_meters_distance(radar.max_range))
+        launch_row = self.launch_list.currentRow()
+        if launch_row >= 0 and launch_row < len(self.canvas.launch_pads):
+            pad = self.canvas.launch_pads[launch_row]
+            self.launch_missile_speed.setValue(self.canvas.world_to_mps_speed(pad.missile_speed))
+            self.launch_range.setValue(self.canvas.world_to_meters_distance(pad.launch_range))
+
+    def update_zoom_display(self):
+        zoom_percent = int(self.canvas.zoom_level * 100)
+        self.zoom_label.setText(f"Масштаб: {zoom_percent}%")
+
+    # ========== Карта ==========
+    def set_background(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите фоновое изображение",
+            "",
+            "Изображения (*.png *.jpg *.jpeg *.bmp *.gif)",
+        )
+        if file_path:
+            dialog = ScaleDialog(self.canvas.map_scale, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                scale = dialog.get_scale()
+                self.scale_spin.blockSignals(True)
+                self.scale_spin.setValue(scale)
+                self.scale_spin.blockSignals(False)
+                self.canvas.set_map_scale(scale)
+                self.canvas.set_background_image(file_path)
+                self.refresh_trajectory_list()
+                self.refresh_radar_list()
+                self.refresh_launch_list()
+
+    def remove_background(self):
+        self.canvas.remove_background()
