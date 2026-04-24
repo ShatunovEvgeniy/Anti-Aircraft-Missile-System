@@ -2,7 +2,7 @@ import random as r
 import math
 
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import QPointF, QPoint
+from PyQt6.QtCore import QPointF
 
 
 class Trajectory:
@@ -84,7 +84,7 @@ class Trajectory:
     @classmethod
     def from_dict(cls, d):
         name = d.get("name", "Unknown")
-        points = [QPoint(x,y) for x,y in d.get("points", [])]
+        points = [QPointF(float(x), float(y)) for x, y in d.get("points", [])]
         speed = d.get("speed", 200.0)
         c = d.get("color")
         if c:
