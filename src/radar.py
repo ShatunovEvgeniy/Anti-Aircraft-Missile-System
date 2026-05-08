@@ -50,9 +50,18 @@ class Radar:
         self.tracked_point = QPointF(point)
 
     def update_tracking(self, point, t):
-        self.current_angle = self._point_angle(point)
+        target_angle = self._point_angle(point)
+        current_angle = self.get_current_angle(t)
+        angle_diff = (target_angle - current_angle + 540.0) % 360.0 - 180.0
+        max_step = self.rotation_speed * max(0.0, t - self.rotation_reference_time)
+        if abs(angle_diff) <= max_step:
+            self.current_angle = target_angle
+        else:
+            direction = 1.0 if angle_diff > 0 else -1.0
+            self.current_angle = (current_angle + direction * max_step) % 360.0
         self.rotation_reference_time = t
         self.tracked_point = QPointF(point)
+        return self._angle_inside_sector(target_angle, self.current_angle)
 
     def stop_tracking(self, t):
         current_angle = self.get_current_angle(t)

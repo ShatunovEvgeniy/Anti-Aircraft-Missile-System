@@ -697,10 +697,10 @@ class PointCanvas(QWidget):
                 if not traj.is_destroyed:
                     pos = traj.get_position(end_time)
                     if pos and radar.can_track_point(pos):
-                        radar.update_tracking(pos, end_time)
-                        active_now.add((id(radar), id(traj)))
-                        self._record_observed_position(traj, pos)
-                        continue
+                        if radar.update_tracking(pos, end_time):
+                            active_now.add((id(radar), id(traj)))
+                            self._record_observed_position(traj, pos)
+                            continue
                 radar.stop_tracking(end_time)
             for traj in self.trajectories:
                 if traj.is_destroyed:
