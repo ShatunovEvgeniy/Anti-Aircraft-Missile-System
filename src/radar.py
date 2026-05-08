@@ -44,21 +44,13 @@ class Radar:
         return self._point_in_range(point)
 
     def start_tracking(self, target, point, t):
-        self.current_angle = self.get_current_angle(t)
+        self.current_angle = self._point_angle(point)
         self.rotation_reference_time = t
         self.tracked_target = target
         self.tracked_point = QPointF(point)
 
     def update_tracking(self, point, t):
-        current_angle = self.get_current_angle(t)
-        target_angle = self._point_angle(point)
-        angle_diff = (target_angle - current_angle + 540.0) % 360.0 - 180.0
-        max_step = self.rotation_speed * max(0.0, t - self.rotation_reference_time)
-        if abs(angle_diff) <= max_step:
-            self.current_angle = target_angle
-        else:
-            direction = 1.0 if angle_diff > 0 else -1.0
-            self.current_angle = (current_angle + direction * max_step) % 360.0
+        self.current_angle = self._point_angle(point)
         self.rotation_reference_time = t
         self.tracked_point = QPointF(point)
 
@@ -95,13 +87,22 @@ class Radar:
             return self.contains_point(point, interval_end)
 
         point_angle = self._point_angle(point)
-        start_angle = self.start_angle + self.rotation_speed * interval_start
-        end_angle = self.start_angle + self.rotation_speed * interval_end
+        start_angle = self.start_angle + self.rotation_speed * (
+            interval_start - self.rotation_reference_time
+        )
+        end_angle = self.start_angle + self.rotation_speed * (
+            interval_end - self.rotation_reference_time
+        )
+        sweep_span = abs(end_angle - start_angle) + self.view_angle
+        if sweep_span >= 360.0:
+            return True
+
         sweep_min = min(start_angle, end_angle) - self.view_angle / 2.0
         sweep_max = max(start_angle, end_angle) + self.view_angle / 2.0
 
-        k_min = math.floor((sweep_min - point_angle) / 360.0) - 1
-        k_max = math.ceil((sweep_max - point_angle) / 360.0) + 1
+        nearest_turn = round((sweep_min - point_angle) / 360.0)
+        k_min = nearest_turn - 1
+        k_max = nearest_turn + 2
         for k in range(k_min, k_max + 1):
             unwrapped_angle = point_angle + 360.0 * k
             if sweep_min <= unwrapped_angle <= sweep_max:

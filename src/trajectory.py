@@ -38,13 +38,43 @@ class Trajectory:
         else:
             self.travel_time = float('inf')
 
+    def _update_travel_time(self):
+        if len(self.points) >= 2 and self.speed > 0:
+            self.travel_time = self.total_length / self.speed
+        else:
+            self.travel_time = float('inf')
+
+    def add_point(self, point):
+        new_point = QPointF(point)
+        if self.points:
+            start = QPointF(self.points[-1])
+            dx = new_point.x() - start.x()
+            dy = new_point.y() - start.y()
+            length = math.hypot(dx, dy)
+            self.segments.append((start, new_point, length))
+            self.total_length += length
+        self.points.append(new_point)
+        self._update_travel_time()
+
+    def remove_last_point(self):
+        if not self.points:
+            return None
+        point = self.points.pop()
+        if self.segments:
+            _, _, length = self.segments.pop()
+            self.total_length -= length
+            if self.total_length < 0:
+                self.total_length = 0.0
+        self._update_travel_time()
+        return point
+
     def get_position(self, sim_time):
         if self.is_destroyed or not self.points:
             return None
         if sim_time <= 0:
             return QPointF(self.points[0])
-        if sim_time >= self.travel_time:
-            return QPointF(self.points[-1])
+        if sim_time > self.travel_time:
+            return None
         t = sim_time / self.travel_time
         return self.get_position_by_t(t)
 
@@ -68,7 +98,7 @@ class Trajectory:
 
     def set_speed(self, speed):
         self.speed = max(0.001, speed)
-        self.compute_segments()
+        self._update_travel_time()
 
     def reset_simulation_state(self):
         self.is_destroyed = False

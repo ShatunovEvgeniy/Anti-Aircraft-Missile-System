@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QCheckBox,
     QSlider,
     QSplitter,
     QStatusBar,
@@ -52,6 +53,8 @@ from simulation_defaults import (
     METERS_PER_PIXEL,
 )
 from trajectory import Trajectory
+
+PROGRESS_SLIDER_STEPS = 10_000
 
 
 class ScaleDialog(QDialog):
@@ -114,6 +117,7 @@ class PointCanvas(QWidget):
         self.radars = []
         self.launch_pads = []
         self._active_detections = set()
+        self.observed_tracks = {}
 
         self.simulation_time = 0.0
         self.auto_max_time = 0.0
@@ -134,6 +138,8 @@ class PointCanvas(QWidget):
         self.background_image = None
         self.background_opacity = 0.7
         self.background_path = None
+        self.show_true_trajectories = True
+        self.show_observed_trajectories = False
 
     # ========== Конвертация единиц ==========
     def meters_to_world_distance(self, distance_m):
@@ -255,6 +261,14 @@ class PointCanvas(QWidget):
 
     def toggle_grid(self):
         self.show_grid = not self.show_grid
+        self.update()
+
+    def set_show_true_trajectories(self, enabled):
+        self.show_true_trajectories = enabled
+        self.update()
+
+    def set_show_observed_trajectories(self, enabled):
+        self.show_observed_trajectories = enabled
         self.update()
 
     def draw_grid(self, painter):
@@ -497,6 +511,7 @@ class PointCanvas(QWidget):
                 if radar.tracked_target is traj:
                     radar.stop_tracking(self.simulation_time)
             del self.trajectories[idx]
+            self.observed_tracks.pop(id(traj), None)
             self._active_detections = {pair for pair in self._active_detections if pair[1] != id(traj)}
             if self.trajectories:
                 self.active_index = min(idx, len(self.trajectories) - 1)
@@ -616,6 +631,7 @@ class PointCanvas(QWidget):
 
     def _reset_simulation_entities(self):
         self._active_detections.clear()
+        self.observed_tracks.clear()
         for traj in self.trajectories:
             traj.reset_simulation_state()
         for pad in self.launch_pads:
@@ -635,7 +651,7 @@ class PointCanvas(QWidget):
     def set_playback_speed(self, speed):
         self.playback_speed = max(0.1, speed)
 
-    def _recalc_max_time(self):
+    def _recalc_max_time(self, update_position=True):
         self.auto_max_time = self._get_auto_max_time()
         self.max_time = (
             self.simulation_duration_override
@@ -644,14 +660,15 @@ class PointCanvas(QWidget):
         )
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
-            self.progress_slider.setRange(0, int(self.max_time * 1000) if self.max_time > 0 else 1000)
+            self.progress_slider.setRange(0, PROGRESS_SLIDER_STEPS)
             self.progress_slider.blockSignals(False)
+        if update_position:
             if self.simulation_time > self.max_time:
                 self.set_simulation_time(self.max_time)
             else:
-                self.set_simulation_time(self.simulation_time)
+                self._sync_time_controls()
 
-    def _update_all_positions(self):
+    def _sync_time_controls(self):
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             if self.max_time > 0:
@@ -661,6 +678,9 @@ class PointCanvas(QWidget):
             self.progress_slider.setValue(value)
             self.progress_slider.blockSignals(False)
         self._update_time_display()
+
+    def _update_all_positions(self):
+        self._sync_time_controls()
         self.update()
         self.check_detections(self.simulation_time, self.simulation_time)
 
@@ -679,6 +699,7 @@ class PointCanvas(QWidget):
                     if pos and radar.can_track_point(pos):
                         radar.update_tracking(pos, end_time)
                         active_now.add((id(radar), id(traj)))
+                        self._record_observed_position(traj, pos)
                         continue
                 radar.stop_tracking(end_time)
             for traj in self.trajectories:
@@ -692,6 +713,7 @@ class PointCanvas(QWidget):
                 pair = (id(radar), id(traj))
                 if radar.contains_point_during_interval(pos, start_time, end_time):
                     active_now.add(pair)
+                    self._record_observed_position(traj, pos)
                     if pair not in self._active_detections:
                         radar.start_tracking(traj, pos, end_time)
                         self.detection_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
@@ -708,6 +730,11 @@ class PointCanvas(QWidget):
                     self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель {traj.name}")
 
         self._active_detections = active_now
+
+    def _record_observed_position(self, traj, pos):
+        points = self.observed_tracks.setdefault(id(traj), [])
+        if not points or math.hypot(points[-1].x() - pos.x(), points[-1].y() - pos.y()) > 0.1:
+            points.append(QPointF(pos))
 
     def is_target_visible_by_any_radar(self, pos):
         return any(radar.contains_point(pos, self.simulation_time) for radar in self.radars)
@@ -789,9 +816,6 @@ class PointCanvas(QWidget):
         if self.animation_timer.isActive():
             self.animation_timer.stop()
         self.is_animating = False
-        if self.simulation_time >= self.max_time > 0:
-            self._reset_simulation_entities()
-            self.update()
 
     def simulate(self):
         if self.is_animating:
@@ -848,21 +872,19 @@ class PointCanvas(QWidget):
                 if self.active_index < 0:
                     return
                 traj = self.trajectories[self.active_index]
-                traj.points.append(world_pos)
-                traj.compute_segments()
-                self._recalc_max_time()
+                traj.add_point(world_pos)
+                self._recalc_max_time(update_position=False)
+                self._sync_time_controls()
                 self.update()
-                self._update_all_positions()
             elif event.button() == Qt.MouseButton.RightButton:
                 if self.active_index < 0:
                     return
                 traj = self.trajectories[self.active_index]
                 if traj.points:
-                    traj.points.pop()
-                    traj.compute_segments()
-                    self._recalc_max_time()
+                    traj.remove_last_point()
+                    self._recalc_max_time(update_position=False)
+                    self._sync_time_controls()
                     self.update()
-                    self._update_all_positions()
 
     def _add_radar_at(self, pos):
         name, ok = QInputDialog.getText(self, "Новый радар", "Имя:", text=DEFAULT_RADAR_NAME)
@@ -974,24 +996,57 @@ class PointCanvas(QWidget):
         painter.translate(self.view_offset)
         painter.scale(self.zoom_level, self.zoom_level)
 
-        for index, traj in enumerate(self.trajectories):
-            if traj.points:
-                painter.setPen(QPen(traj.color, 1 / self.zoom_level))
-                painter.setBrush(QBrush(traj.color))
-                for point in traj.points:
-                    painter.drawEllipse(point, 5 / self.zoom_level, 5 / self.zoom_level)
-                for point_index in range(1, len(traj.points)):
-                    painter.drawLine(traj.points[point_index - 1], traj.points[point_index])
+        if self.show_true_trajectories:
+            for index, traj in enumerate(self.trajectories):
+                if traj.points:
+                    painter.setPen(QPen(traj.color, 1 / self.zoom_level))
+                    painter.setBrush(QBrush(traj.color))
+                    for point in traj.points:
+                        painter.drawEllipse(point, 5 / self.zoom_level, 5 / self.zoom_level)
+                    for point_index in range(1, len(traj.points)):
+                        painter.drawLine(traj.points[point_index - 1], traj.points[point_index])
 
-            pos = traj.get_position(self.simulation_time)
-            if pos:
-                if self.is_target_visible_by_any_radar(pos):
-                    color = QColor(255, 0, 0)
-                else:
-                    color = QColor(0, 255, 0) if index == self.active_index else QColor(0, 200, 0)
-                painter.setPen(QPen(color, 2 / self.zoom_level))
-                painter.setBrush(QBrush(color))
-                painter.drawEllipse(pos, 6 / self.zoom_level, 6 / self.zoom_level)
+                pos = traj.get_position(self.simulation_time)
+                if pos:
+                    if self.is_target_visible_by_any_radar(pos):
+                        color = QColor(255, 0, 0)
+                    else:
+                        color = QColor(0, 255, 0) if index == self.active_index else QColor(0, 200, 0)
+                    painter.setPen(QPen(color, 2 / self.zoom_level))
+                    painter.setBrush(QBrush(color))
+                    painter.drawEllipse(pos, 6 / self.zoom_level, 6 / self.zoom_level)
+
+        if self.show_observed_trajectories:
+            for traj in self.trajectories:
+                observed_points = self.observed_tracks.get(id(traj), [])
+                if not observed_points:
+                    continue
+                observed_color = QColor(255, 70, 70)
+                painter.setPen(QPen(observed_color, 2 / self.zoom_level, Qt.PenStyle.DashLine))
+                painter.setBrush(QBrush(observed_color))
+                for point in observed_points:
+                    painter.drawEllipse(point, 4 / self.zoom_level, 4 / self.zoom_level)
+                for point_index in range(1, len(observed_points)):
+                    painter.drawLine(observed_points[point_index - 1], observed_points[point_index])
+                last_point = observed_points[-1]
+                painter.setPen(QPen(QColor(180, 0, 0), 2 / self.zoom_level))
+                painter.setBrush(QBrush(QColor(255, 120, 120)))
+                painter.drawRect(
+                    QRectF(
+                        last_point.x() - 5 / self.zoom_level,
+                        last_point.y() - 5 / self.zoom_level,
+                        10 / self.zoom_level,
+                        10 / self.zoom_level,
+                    )
+                )
+
+        if not self.show_true_trajectories and not self.show_observed_trajectories:
+            for traj in self.trajectories:
+                if traj.points:
+                    painter.setPen(QPen(QColor(160, 160, 160), 1 / self.zoom_level, Qt.PenStyle.DotLine))
+                    painter.setBrush(QBrush(QColor(160, 160, 160)))
+                    for point in traj.points:
+                        painter.drawEllipse(point, 4 / self.zoom_level, 4 / self.zoom_level)
 
         for radar in self.radars:
             painter.setPen(QPen(Qt.GlobalColor.blue, 2 / self.zoom_level))
@@ -1180,6 +1235,25 @@ class MainWindow(QMainWindow):
         self.scale_spin.valueChanged.connect(self.on_scale_changed)
         scale_layout.addWidget(self.scale_spin)
         top_layout.addWidget(scale_group)
+
+        top_layout.addWidget(QLabel("|"))
+
+        display_group = QWidget()
+        display_layout = QHBoxLayout(display_group)
+        display_layout.setContentsMargins(0, 0, 0, 0)
+        display_layout.addWidget(QLabel("Показ:"))
+
+        self.show_true_checkbox = QCheckBox("Истинные")
+        self.show_true_checkbox.setChecked(self.canvas.show_true_trajectories)
+        self.show_true_checkbox.toggled.connect(self.canvas.set_show_true_trajectories)
+        display_layout.addWidget(self.show_true_checkbox)
+
+        self.show_observed_checkbox = QCheckBox("Видимые системой")
+        self.show_observed_checkbox.setChecked(self.canvas.show_observed_trajectories)
+        self.show_observed_checkbox.toggled.connect(self.canvas.set_show_observed_trajectories)
+        display_layout.addWidget(self.show_observed_checkbox)
+
+        top_layout.addWidget(display_group)
 
         top_layout.addWidget(QLabel("|"))
 
