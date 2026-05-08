@@ -700,6 +700,7 @@ class PointCanvas(QWidget):
                         if radar.update_tracking(pos, end_time):
                             active_now.add((id(radar), id(traj)))
                             self._record_observed_position(traj, pos)
+                            self.target_detected.emit(traj, pos)
                             continue
                 radar.stop_tracking(end_time)
             for traj in self.trajectories:
@@ -714,10 +715,10 @@ class PointCanvas(QWidget):
                 if radar.contains_point_during_interval(pos, start_time, end_time):
                     active_now.add(pair)
                     self._record_observed_position(traj, pos)
+                    self.target_detected.emit(traj, pos)
                     if pair not in self._active_detections:
                         radar.start_tracking(traj, pos, end_time)
                         self.detection_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
-                        self.target_detected.emit(traj, pos)
                     break
 
         lost_pairs = self._active_detections - active_now
@@ -745,6 +746,10 @@ class PointCanvas(QWidget):
             for event_type, launcher_name, target_name in events:
                 if event_type == "target_destroyed":
                     self.detection_signal.emit(f"Цель {target_name} была сбита установкой {launcher_name}")
+                elif event_type == "missile_missed":
+                    self.detection_signal.emit(
+                        f"Ракета установки {launcher_name} промахнулась по цели {target_name}"
+                    )
                 elif event_type == "missile_expired":
                     self.detection_signal.emit(
                         f"Ракета установки {launcher_name} самоликвидировалась: цель {target_name} потеряна"
@@ -1095,7 +1100,51 @@ class PointCanvas(QWidget):
             )
 
         for pad in self.launch_pads:
+            for miss_pos in pad.miss_markers:
+                cross_size = 9 / self.zoom_level
+                painter.setPen(QPen(QColor(220, 0, 0), 3 / self.zoom_level))
+                painter.drawLine(
+                    QPointF(miss_pos.x() - cross_size, miss_pos.y() - cross_size),
+                    QPointF(miss_pos.x() + cross_size, miss_pos.y() + cross_size),
+                )
+                painter.drawLine(
+                    QPointF(miss_pos.x() - cross_size, miss_pos.y() + cross_size),
+                    QPointF(miss_pos.x() + cross_size, miss_pos.y() - cross_size),
+                )
+
             for missile in pad.missiles:
+                direction_dx = missile.target_pos.x() - missile.pos.x()
+                direction_dy = missile.target_pos.y() - missile.pos.y()
+                direction_len = math.hypot(direction_dx, direction_dy)
+                if direction_len > 0:
+                    unit_x = direction_dx / direction_len
+                    unit_y = direction_dy / direction_len
+                    arrow_len = min(direction_len, 45 / self.zoom_level)
+                    arrow_end = QPointF(
+                        missile.pos.x() + unit_x * arrow_len,
+                        missile.pos.y() + unit_y * arrow_len,
+                    )
+                    head_len = 8 / self.zoom_level
+                    perp_x = -unit_y
+                    perp_y = unit_x
+                    arrow_head = QPolygonF(
+                        [
+                            arrow_end,
+                            QPointF(
+                                arrow_end.x() - unit_x * head_len + perp_x * head_len * 0.45,
+                                arrow_end.y() - unit_y * head_len + perp_y * head_len * 0.45,
+                            ),
+                            QPointF(
+                                arrow_end.x() - unit_x * head_len - perp_x * head_len * 0.45,
+                                arrow_end.y() - unit_y * head_len - perp_y * head_len * 0.45,
+                            ),
+                        ]
+                    )
+                    painter.setPen(QPen(QColor(255, 120, 0), 2 / self.zoom_level))
+                    painter.setBrush(QBrush(QColor(255, 120, 0)))
+                    painter.drawLine(missile.pos, arrow_end)
+                    painter.drawPolygon(arrow_head)
+
                 size = 8 / self.zoom_level
                 points = [
                     QPointF(missile.pos.x(), missile.pos.y() - size),

@@ -15,6 +15,7 @@ class LaunchPad:
         self.launch_range = launch_range
         self.missile_lifetime = missile_lifetime
         self.missiles = []
+        self.miss_markers = []
 
     @staticmethod
     def get_distance(p1, p2):
@@ -38,6 +39,9 @@ class LaunchPad:
             if missile.is_dead:
                 if missile.hit_target:
                     events.append(("target_destroyed", self.name, missile.target_traj.name))
+                elif missile.missed_target:
+                    self.miss_markers.append(missile.miss_pos)
+                    events.append(("missile_missed", self.name, missile.target_traj.name))
                 elif current_time - missile.last_update_time > self.missile_lifetime:
                     events.append(("missile_expired", self.name, missile.target_traj.name))
                 if missile in self.missiles:
@@ -46,6 +50,7 @@ class LaunchPad:
 
     def reset_simulation_state(self):
         self.missiles.clear()
+        self.miss_markers.clear()
 
     def to_dict(self):
         return {
