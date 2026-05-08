@@ -131,6 +131,7 @@ class PointCanvas(QWidget):
         self.last_time = 0.0
         self.progress_slider = None
         self.time_label = None
+        self.max_simulation_step = 0.02
         self.playback_speed = DEFAULT_PLAYBACK_SPEED
 
         self.drawing_mode = "trajectory"
@@ -761,7 +762,18 @@ class PointCanvas(QWidget):
         bounded_time = max(0.0, min(t, self.max_time))
         if bounded_time <= 0.0 or bounded_time < old:
             self._reset_simulation_entities()
-        self.simulation_time = bounded_time
+        dt_actual = bounded_time - old
+        if dt_actual > 0:
+            current = old
+            while current < bounded_time:
+                next_time = min(current + self.max_simulation_step, bounded_time)
+                self.simulation_time = next_time
+                self.update_missiles(next_time - current)
+                self.check_detections(current, next_time)
+                current = next_time
+        else:
+            self.simulation_time = bounded_time
+
         if self.progress_slider:
             self.progress_slider.blockSignals(True)
             if self.max_time > 0:
@@ -771,12 +783,10 @@ class PointCanvas(QWidget):
             self.progress_slider.setValue(value)
             self.progress_slider.blockSignals(False)
         self._update_time_display()
-        dt_actual = self.simulation_time - old
-        if dt_actual > 0:
-            self.update_missiles(dt_actual)
         self.update()
         if dt_actual >= 0:
-            self.check_detections(old, self.simulation_time)
+            if dt_actual == 0:
+                self.check_detections(self.simulation_time, self.simulation_time)
         else:
             self.check_detections(self.simulation_time, self.simulation_time)
 

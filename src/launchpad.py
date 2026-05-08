@@ -1,7 +1,7 @@
 import math
 from PyQt6.QtCore import QPointF
 
-from missile import Missile
+from missile import Missile, predict_intercept_point
 
 
 class LaunchPad:
@@ -28,7 +28,22 @@ class LaunchPad:
         return math.hypot(target_pos.x()-self.center.x(), target_pos.y()-self.center.y()) <= self.launch_range
 
     def launch_missile(self, target_traj, target_pos, current_time):
-        missile = Missile(self.center, target_traj, target_pos, self.missile_speed, self.missile_lifetime, current_time)
+        target_velocity = target_traj.get_velocity(current_time)
+        predicted_target_pos, _ = predict_intercept_point(
+            self.center,
+            self.missile_speed,
+            target_pos,
+            target_velocity,
+        )
+        missile = Missile(
+            self.center,
+            target_traj,
+            predicted_target_pos,
+            self.missile_speed,
+            self.missile_lifetime,
+            current_time,
+            target_velocity,
+        )
         self.missiles.append(missile)
 
 
