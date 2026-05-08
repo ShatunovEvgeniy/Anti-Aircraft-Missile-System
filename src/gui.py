@@ -1064,9 +1064,44 @@ class PointCanvas(QWidget):
                         painter.drawEllipse(point, 4 / self.zoom_level, 4 / self.zoom_level)
 
         for radar in self.radars:
-            painter.setPen(QPen(Qt.GlobalColor.blue, 2 / self.zoom_level))
-            painter.setBrush(QBrush(Qt.GlobalColor.blue))
-            painter.drawEllipse(radar.center, 5 / self.zoom_level, 5 / self.zoom_level)
+            # Загрузка иконки радара (загружаем один раз, кэшируем)
+            if not hasattr(self, '_radar_icon'):
+                icon_path = "../images/icons/radar.png"  # Путь к вашей иконке
+                if os.path.exists(icon_path):
+                    self._radar_icon = QPixmap(icon_path)
+                else:
+                    self._radar_icon = None
+                    print(f"Иконка радара не найдена: {icon_path}")
+
+            # Рисуем иконку вместо кружочка
+            if self._radar_icon and not self._radar_icon.isNull():
+                # Масштабируем иконку в зависимости от зума
+                target_size = 50
+                painter.save()
+                painter.translate(radar.center)
+                painter.scale(1.0 / self.zoom_level, 1.0 / self.zoom_level)
+
+                scaled_icon = self._radar_icon.scaled(
+                    target_size, target_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+
+                # Центрируем
+                painter.drawPixmap(
+                    -target_size // 2,
+                    -target_size // 2,
+                    scaled_icon
+                )
+
+                painter.restore()
+            else:
+                # Fallback: рисуем кружок если иконка не загрузилась
+                painter.setPen(QPen(Qt.GlobalColor.blue, 2 / self.zoom_level))
+                painter.setBrush(QBrush(Qt.GlobalColor.blue))
+                painter.drawEllipse(radar.center, 5 / self.zoom_level, 5 / self.zoom_level)
+
+            # Остальная отрисовка радара (сектор обзора, дальность и т.д.)
             painter.setPen(
                 QPen(Qt.GlobalColor.darkBlue, 1 / self.zoom_level, Qt.PenStyle.DashLine)
             )
