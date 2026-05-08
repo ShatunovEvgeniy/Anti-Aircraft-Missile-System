@@ -2,6 +2,7 @@ import json
 import math
 import os
 import time
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QAction, QPixmap, QIcon, QPainterPath, QPolygonF
@@ -1066,9 +1067,10 @@ class PointCanvas(QWidget):
         for radar in self.radars:
             # Загрузка иконки радара (загружаем один раз, кэшируем)
             if not hasattr(self, '_radar_icon'):
-                icon_path = "../images/icons/radar.png"  # Путь к вашей иконке
-                if os.path.exists(icon_path):
-                    self._radar_icon = QPixmap(icon_path)
+                ICON_PATH = (Path(__file__).parent.parent / "images" / "icons" / "radar.png").resolve()
+                print(ICON_PATH)
+                if ICON_PATH.exists():
+                    self._radar_icon = QPixmap(str(ICON_PATH))
                 else:
                     self._radar_icon = None
                     print(f"Иконка радара не найдена: {icon_path}")
