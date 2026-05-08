@@ -66,6 +66,35 @@ class Trajectory:
             cum += length
         return QPointF(self.points[-1])
 
+    def get_velocity(self, sim_time):
+        if self.is_destroyed or not self.segments or self.speed <= 0:
+            return QPointF(0.0, 0.0)
+        if sim_time >= self.travel_time:
+            return QPointF(0.0, 0.0)
+
+        if sim_time <= 0:
+            target_distance = 0.0
+        else:
+            target_distance = min(sim_time * self.speed, self.total_length)
+
+        cum = 0.0
+        for start, end, length in self.segments:
+            if length <= 0:
+                cum += length
+                continue
+            if target_distance <= cum + length:
+                dx = end.x() - start.x()
+                dy = end.y() - start.y()
+                return QPointF(dx / length * self.speed, dy / length * self.speed)
+            cum += length
+
+        start, end, length = self.segments[-1]
+        if length <= 0:
+            return QPointF(0.0, 0.0)
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        return QPointF(dx / length * self.speed, dy / length * self.speed)
+
     def set_speed(self, speed):
         self.speed = max(0.001, speed)
         self.compute_segments()
