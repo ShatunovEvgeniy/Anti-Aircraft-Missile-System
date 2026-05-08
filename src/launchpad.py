@@ -42,6 +42,7 @@ class LaunchPad:
             self.missile_speed,
             self.missile_lifetime,
             current_time,
+            target_velocity,
         )
         self.missiles.append(missile)
 
