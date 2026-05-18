@@ -697,7 +697,7 @@ class PointCanvas(QWidget):
             if radar.tracked_target is not None:
                 traj = radar.tracked_target
                 if not traj.is_destroyed:
-                    pos = traj.get_position(end_time)
+                    pos = traj.get_observed_position(end_time, self.map_scale)
                     if pos and radar.can_track_point(pos):
                         if radar.update_tracking(pos, end_time):
                             active_now.add((id(radar), id(traj)))
@@ -709,7 +709,7 @@ class PointCanvas(QWidget):
                 if traj.is_destroyed:
                     continue
 
-                pos = traj.get_position(end_time)
+                pos = traj.get_observed_position(end_time, self.map_scale)
                 if not pos:
                     continue
 
@@ -736,11 +736,12 @@ class PointCanvas(QWidget):
 
     def _record_observed_position(self, traj, pos):
         points = self.observed_tracks.setdefault(id(traj), [])
-        if not points or math.hypot(points[-1].x() - pos.x(), points[-1].y() - pos.y()) > 0.1:
+        min_record_distance = max(0.001, self.meters_to_world_distance(2.0))
+        if not points or math.hypot(points[-1].x() - pos.x(), points[-1].y() - pos.y()) > min_record_distance:
             points.append(QPointF(pos))
 
-    def is_target_visible_by_any_radar(self, pos):
-        return any(radar.contains_point(pos, self.simulation_time) for radar in self.radars)
+    def is_target_visible_by_any_radar(self, traj):
+        return any(pair[1] == id(traj) for pair in self._active_detections)
 
     def update_missiles(self, dt):
         for pad in self.launch_pads:
@@ -1024,7 +1025,7 @@ class PointCanvas(QWidget):
 
                 pos = traj.get_position(self.simulation_time)
                 if pos:
-                    if self.is_target_visible_by_any_radar(pos):
+                    if self.is_target_visible_by_any_radar(traj):
                         color = QColor(255, 0, 0)
                     else:
                         color = QColor(0, 255, 0) if index == self.active_index else QColor(0, 200, 0)
@@ -1701,6 +1702,7 @@ class MainWindow(QMainWindow):
         new_name, ok = QInputDialog.getText(self, "Переименовать", "Новое имя:", text=traj.name)
         if ok and new_name:
             traj.name = new_name
+            traj.refresh_motion_error_key()
             self.refresh_trajectory_list()
 
     def apply_speed(self):
@@ -1799,7 +1801,7 @@ class MainWindow(QMainWindow):
                     self.log_detection(
                         f"Командный центр отправил команду установке {pad.name} сбить цель {traj.name}"
                     )
-                    pad.launch_missile(traj, pos, self.canvas.simulation_time)
+                    pad.launch_missile(traj, pos, self.canvas.simulation_time, self.canvas.map_scale)
                     self.statusBar.showMessage(
                         f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'",
                         2000,

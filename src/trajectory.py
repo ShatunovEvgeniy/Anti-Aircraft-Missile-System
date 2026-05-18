@@ -4,6 +4,8 @@ import math
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import QPointF
 
+from motion_errors import get_target_position_error
+
 
 class Trajectory:
     def __init__(self, name="Траектория", color=None, speed=200.0):
@@ -14,10 +16,18 @@ class Trajectory:
         self.speed = speed
         self.travel_time = float('inf')
         self.is_destroyed = False
+        self.motion_error_key = name
         if color is None:
             self.color = QColor(r.randint(0,255), r.randint(0,255), r.randint(0,255))
         else:
             self.color = color
+
+    def _refresh_motion_error_key(self):
+        point_signature = ";".join(f"{point.x():.3f}:{point.y():.3f}" for point in self.points)
+        self.motion_error_key = f"{self.name}|{point_signature}|{self.speed:.6f}"
+
+    def refresh_motion_error_key(self):
+        self._refresh_motion_error_key()
 
     def compute_segments(self):
         self.segments.clear()
@@ -37,6 +47,7 @@ class Trajectory:
             self.travel_time = self.total_length / self.speed
         else:
             self.travel_time = float('inf')
+        self._refresh_motion_error_key()
 
     def _update_travel_time(self):
         if len(self.points) >= 2 and self.speed > 0:
@@ -55,6 +66,7 @@ class Trajectory:
             self.total_length += length
         self.points.append(new_point)
         self._update_travel_time()
+        self._refresh_motion_error_key()
 
     def remove_last_point(self):
         if not self.points:
@@ -66,6 +78,7 @@ class Trajectory:
             if self.total_length < 0:
                 self.total_length = 0.0
         self._update_travel_time()
+        self._refresh_motion_error_key()
         return point
 
     def get_position(self, sim_time):
@@ -77,6 +90,13 @@ class Trajectory:
             return None
         t = sim_time / self.travel_time
         return self.get_position_by_t(t)
+
+    def get_observed_position(self, sim_time, meters_per_pixel):
+        true_position = self.get_position(sim_time)
+        if true_position is None:
+            return None
+        error = get_target_position_error(self.motion_error_key, sim_time, meters_per_pixel)
+        return QPointF(true_position.x() + error.x(), true_position.y() + error.y())
 
     def get_position_by_t(self, t):
         if not self.segments:
@@ -128,6 +148,7 @@ class Trajectory:
     def set_speed(self, speed):
         self.speed = max(0.001, speed)
         self._update_travel_time()
+        self._refresh_motion_error_key()
 
     def reset_simulation_state(self):
         self.is_destroyed = False

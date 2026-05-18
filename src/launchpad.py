@@ -27,7 +27,7 @@ class LaunchPad:
     def can_launch(self, target_pos):
         return math.hypot(target_pos.x()-self.center.x(), target_pos.y()-self.center.y()) <= self.launch_range
 
-    def launch_missile(self, target_traj, target_pos, current_time):
+    def launch_missile(self, target_traj, target_pos, current_time, meters_per_pixel=1.0):
         target_velocity = target_traj.get_velocity(current_time)
         predicted_target_pos, _ = predict_intercept_point(
             self.center,
@@ -43,6 +43,7 @@ class LaunchPad:
             self.missile_lifetime,
             current_time,
             target_velocity,
+            meters_per_pixel,
         )
         self.missiles.append(missile)
 

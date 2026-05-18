@@ -2,6 +2,8 @@ import math
 
 from PyQt6.QtCore import QPointF
 
+from motion_errors import get_missile_position_error
+
 
 def _distance(p1, p2):
     return math.hypot(p2.x() - p1.x(), p2.y() - p1.y())
@@ -89,6 +91,7 @@ class Missile:
         lifetime,
         creation_time,
         target_velocity=None,
+        meters_per_pixel=1.0,
     ):
         self.pos = QPointF(start_pos)
         self.target_traj = target_traj
@@ -105,6 +108,16 @@ class Missile:
         self.last_known_target_velocity = (
             QPointF(target_velocity) if target_velocity is not None else QPointF(0.0, 0.0)
         )
+        self.meters_per_pixel = max(0.1, meters_per_pixel)
+        self.motion_error_key = (
+            f"{self.target_traj.name}|{creation_time:.6f}|"
+            f"{start_pos.x():.3f}:{start_pos.y():.3f}|{speed:.6f}"
+        )
+        self.last_motion_error = get_missile_position_error(
+            self.motion_error_key,
+            creation_time,
+            self.meters_per_pixel,
+        )
 
     def update(self, dt, current_time, radars, trajectories):
         if self.is_dead:
@@ -117,16 +130,17 @@ class Missile:
         previous_time = max(self.creation_time, current_time - dt)
         current_target_pos = self.target_traj.get_position(current_time)
         previous_target_pos = self.target_traj.get_position(previous_time)
+        observed_target_pos = self.target_traj.get_observed_position(current_time, self.meters_per_pixel)
 
         target_visible = False
-        if current_target_pos is not None:
+        if observed_target_pos is not None:
             target_visible = any(
-                radar.contains_point_during_interval(current_target_pos, previous_time, current_time)
+                radar.contains_point_during_interval(observed_target_pos, previous_time, current_time)
                 for radar in radars
             )
 
         if target_visible:
-            self.last_known_target_pos = QPointF(current_target_pos)
+            self.last_known_target_pos = QPointF(observed_target_pos)
             self.last_known_target_velocity = QPointF(self.target_traj.get_velocity(current_time))
             self.last_update_time = current_time
         elif current_time - self.last_update_time > self.lifetime:
@@ -153,6 +167,17 @@ class Missile:
         step = min(dt * self.speed, dist)
         if dist > 0:
             self.pos += QPointF(dx / dist * step, dy / dist * step)
+
+        current_motion_error = get_missile_position_error(
+            self.motion_error_key,
+            current_time,
+            self.meters_per_pixel,
+        )
+        self.pos += QPointF(
+            current_motion_error.x() - self.last_motion_error.x(),
+            current_motion_error.y() - self.last_motion_error.y(),
+        )
+        self.last_motion_error = current_motion_error
 
         if current_target_pos is not None and self._hit_current_target(
             previous_pos,
