@@ -8,7 +8,14 @@ from motion_errors import get_target_position_error
 
 
 class Trajectory:
-    def __init__(self, name="Траектория", color=None, speed=200.0):
+    def __init__(
+        self,
+        name="Траектория",
+        color=None,
+        speed=200.0,
+        radar_cross_section_m2=5.0,
+        target_type="fighter",
+    ):
         self.name = name
         self.points = []
         self.segments = []
@@ -17,6 +24,8 @@ class Trajectory:
         self.travel_time = float('inf')
         self.is_destroyed = False
         self.motion_error_key = name
+        self.radar_cross_section_m2 = max(0.001, float(radar_cross_section_m2))
+        self.target_type = target_type
         if color is None:
             self.color = QColor(r.randint(0,255), r.randint(0,255), r.randint(0,255))
         else:
@@ -150,6 +159,12 @@ class Trajectory:
         self._update_travel_time()
         self._refresh_motion_error_key()
 
+    def set_radar_cross_section(self, radar_cross_section_m2):
+        self.radar_cross_section_m2 = max(0.001, float(radar_cross_section_m2))
+
+    def set_target_type(self, target_type):
+        self.target_type = target_type
+
     def reset_simulation_state(self):
         self.is_destroyed = False
 
@@ -158,6 +173,8 @@ class Trajectory:
             "name": self.name,
             "color": {"r": self.color.red(), "g": self.color.green(), "b": self.color.blue()},
             "speed": self.speed,
+            "radar_cross_section_m2": self.radar_cross_section_m2,
+            "target_type": self.target_type,
             "points": [(p.x(), p.y()) for p in self.points]
         }
 
@@ -166,12 +183,14 @@ class Trajectory:
         name = d.get("name", "Unknown")
         points = [QPointF(float(x), float(y)) for x, y in d.get("points", [])]
         speed = d.get("speed", 200.0)
+        radar_cross_section_m2 = d.get("radar_cross_section_m2", 5.0)
+        target_type = d.get("target_type", "fighter")
         c = d.get("color")
         if c:
             color = QColor(c["r"], c["g"], c["b"])
         else:
             color = None
-        t = cls(name, color, speed)
+        t = cls(name, color, speed, radar_cross_section_m2, target_type)
         t.points = points
         t.compute_segments()
         return t

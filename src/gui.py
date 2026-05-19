@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QPainter, QBrush, QColor, QPen, QAction, QPixmap, QIcon, QPainterPath, QPolygonF
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -49,9 +50,12 @@ from simulation_defaults import (
     DEFAULT_RADAR_ROTATION_SPEED,
     DEFAULT_RADAR_VIEW_ANGLE,
     DEFAULT_TARGET_NAME,
+    DEFAULT_TARGET_RCS_M2,
+    DEFAULT_TARGET_TYPE,
     DEFAULT_TARGET_SPEED_MPS,
     MAX_SIMULATION_DURATION_S,
     METERS_PER_PIXEL,
+    TARGET_TYPE_PRESETS,
 )
 from trajectory import Trajectory
 
@@ -89,6 +93,7 @@ class ScaleDialog(QDialog):
 
 class PointCanvas(QWidget):
     detection_signal = pyqtSignal(str)
+    debug_signal = pyqtSignal(str)
     target_detected = pyqtSignal(object, QPointF)
     radar_list_changed = pyqtSignal()
     trajectory_list_changed = pyqtSignal()
@@ -118,7 +123,9 @@ class PointCanvas(QWidget):
         self.radars = []
         self.launch_pads = []
         self._active_detections = set()
+        self._beam_hits = set()
         self.observed_tracks = {}
+        self._target_classifications = {}
 
         self.simulation_time = 0.0
         self.auto_max_time = 0.0
@@ -142,6 +149,23 @@ class PointCanvas(QWidget):
         self.background_path = None
         self.show_true_trajectories = True
         self.show_observed_trajectories = False
+
+    def _get_target_profile(self, target_type):
+        return TARGET_TYPE_PRESETS.get(target_type, TARGET_TYPE_PRESETS[DEFAULT_TARGET_TYPE])
+
+    def _radar_log_name(self, radar):
+        return f"{radar.name} @({radar.center.x():.0f}, {radar.center.y():.0f})"
+
+    def _get_active_targets_for_radar(self, radar):
+        active_targets = []
+        for pair in self._active_detections:
+            if pair[0] != id(radar):
+                continue
+            for traj in self.trajectories:
+                if id(traj) == pair[1] and not traj.is_destroyed:
+                    active_targets.append(traj)
+                    break
+        return active_targets
 
     # ========== Конвертация единиц ==========
     def meters_to_world_distance(self, distance_m):
@@ -484,15 +508,26 @@ class PointCanvas(QWidget):
         self.update()
 
     # ========== Траектории ==========
-    def add_trajectory(self, name=None, points=None, speed=None, color=None):
+    def add_trajectory(
+        self,
+        name=None,
+        points=None,
+        speed=None,
+        color=None,
+        radar_cross_section_m2=None,
+        target_type=DEFAULT_TARGET_TYPE,
+    ):
+        profile = self._get_target_profile(target_type)
         if name is None:
             if self.trajectories:
-                name = f"{DEFAULT_TARGET_NAME} {len(self.trajectories)+1}"
+                name = f"{profile['default_name']} {len(self.trajectories)+1}"
             else:
-                name = DEFAULT_TARGET_NAME
+                name = profile["default_name"]
         if speed is None:
-            speed = self.mps_to_world_speed(DEFAULT_TARGET_SPEED_MPS)
-        traj = Trajectory(name, color, speed)
+            speed = self.mps_to_world_speed(profile["speed_mps"])
+        if radar_cross_section_m2 is None:
+            radar_cross_section_m2 = profile["rcs_m2"]
+        traj = Trajectory(name, color, speed, radar_cross_section_m2, target_type)
         if points:
             traj.points = points
             traj.compute_segments()
@@ -510,10 +545,15 @@ class PointCanvas(QWidget):
         if 0 <= idx < len(self.trajectories):
             traj = self.trajectories[idx]
             for radar in self.radars:
-                if radar.tracked_target is traj:
-                    radar.stop_tracking(self.simulation_time)
+                radar.stop_tracking(self.simulation_time, traj)
             del self.trajectories[idx]
             self.observed_tracks.pop(id(traj), None)
+            self._target_classifications = {
+                pair: value
+                for pair, value in self._target_classifications.items()
+                if pair[1] != id(traj)
+            }
+            self._beam_hits = {pair for pair in self._beam_hits if pair[1] != id(traj)}
             self._active_detections = {pair for pair in self._active_detections if pair[1] != id(traj)}
             if self.trajectories:
                 self.active_index = min(idx, len(self.trajectories) - 1)
@@ -537,6 +577,24 @@ class PointCanvas(QWidget):
             self._update_all_positions()
             self.update()
 
+    def set_trajectory_rcs(self, idx, radar_cross_section_m2):
+        if 0 <= idx < len(self.trajectories):
+            traj = self.trajectories[idx]
+            traj.set_radar_cross_section(radar_cross_section_m2)
+            self._target_classifications = {
+                pair: value
+                for pair, value in self._target_classifications.items()
+                if pair[1] != id(traj)
+            }
+            self._update_all_positions()
+            self.update()
+
+    def set_trajectory_target_type(self, idx, target_type):
+        if 0 <= idx < len(self.trajectories):
+            self.trajectories[idx].set_target_type(target_type)
+            self._update_all_positions()
+            self.update()
+
     # ========== Радары ==========
     def add_radar(self, name, center, max_range, view_angle, rot_speed):
         radar = Radar(name, center, max_range, view_angle, rot_speed)
@@ -545,19 +603,20 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.radar_list_changed.emit()
-        self.detection_signal.emit(f"Создан радар {name} в точке ({center.x():.0f}, {center.y():.0f})")
+        self.detection_signal.emit(f"Создан радар {self._radar_log_name(radar)}")
         self.update()
 
     def remove_radar(self, idx):
         if 0 <= idx < len(self.radars):
             radar = self.radars[idx]
             del self.radars[idx]
+            self._beam_hits = {pair for pair in self._beam_hits if pair[0] != id(radar)}
             self._active_detections = {pair for pair in self._active_detections if pair[0] != id(radar)}
             self.stop_animation()
             self._recalc_max_time()
             self._update_all_positions()
             self.radar_list_changed.emit()
-            self.detection_signal.emit(f"Удалён радар {radar.name}")
+            self.detection_signal.emit(f"Удалён радар {self._radar_log_name(radar)}")
             self.update()
 
     def update_radar(self, idx, name, max_range, view_angle, rot_speed):
@@ -567,8 +626,13 @@ class PointCanvas(QWidget):
             radar.max_range = max_range
             radar.view_angle = view_angle
             radar.rotation_speed = rot_speed
-            if radar.tracked_point is not None and not radar.can_track_point(radar.tracked_point):
-                radar.stop_tracking(self.simulation_time)
+            radar.stop_tracking(self.simulation_time)
+            self._target_classifications = {
+                pair: value
+                for pair, value in self._target_classifications.items()
+                if pair[0] != id(radar)
+            }
+            self._beam_hits = {pair for pair in self._beam_hits if pair[0] != id(radar)}
             self.stop_animation()
             self._recalc_max_time()
             self._update_all_positions()
@@ -633,7 +697,9 @@ class PointCanvas(QWidget):
 
     def _reset_simulation_entities(self):
         self._active_detections.clear()
+        self._beam_hits.clear()
         self.observed_tracks.clear()
+        self._target_classifications.clear()
         for traj in self.trajectories:
             traj.reset_simulation_state()
         for pad in self.launch_pads:
@@ -693,18 +759,8 @@ class PointCanvas(QWidget):
             end_time = self.simulation_time
 
         active_now = set()
+        beam_hits_now = set()
         for radar in self.radars:
-            if radar.tracked_target is not None:
-                traj = radar.tracked_target
-                if not traj.is_destroyed:
-                    pos = traj.get_observed_position(end_time, self.map_scale)
-                    if pos and radar.can_track_point(pos):
-                        if radar.update_tracking(pos, end_time):
-                            active_now.add((id(radar), id(traj)))
-                            self._record_observed_position(traj, pos)
-                            self.target_detected.emit(traj, pos)
-                            continue
-                radar.stop_tracking(end_time)
             for traj in self.trajectories:
                 if traj.is_destroyed:
                     continue
@@ -714,25 +770,63 @@ class PointCanvas(QWidget):
                     continue
 
                 pair = (id(radar), id(traj))
-                if radar.contains_point_during_interval(pos, start_time, end_time):
+                if pair in self._active_detections:
+                    if radar.can_track_point(pos):
+                        active_now.add(pair)
+                        radar.update_tracking(traj, pos, end_time)
+                        self._record_observed_position(traj, pos)
+                        self.debug_signal.emit(
+                            f"TRACK_UPDATE radar={self._radar_log_name(radar)} "
+                            f"target={traj.name} time={end_time:.2f}"
+                        )
+                    else:
+                        self.debug_signal.emit(
+                            f"TRACK_DROP radar={self._radar_log_name(radar)} "
+                            f"target={traj.name} time={end_time:.2f} reason=out_of_range_or_untrackable"
+                        )
+                    continue
+
+                if radar.contains_point_during_interval_scan(pos, start_time, end_time):
+                    beam_hits_now.add(pair)
                     active_now.add(pair)
+                    radar.start_tracking(traj, pos, end_time)
                     self._record_observed_position(traj, pos)
                     self.target_detected.emit(traj, pos)
+                    self.debug_signal.emit(
+                        f"SCAN_DETECT radar={self._radar_log_name(radar)} "
+                        f"target={traj.name} start={start_time:.2f} end={end_time:.2f}"
+                    )
                     if pair not in self._active_detections:
-                        radar.start_tracking(traj, pos, end_time)
-                        self.detection_signal.emit(f"Радар {radar.name} захватил цель")
-                    break
+                        self.detection_signal.emit(
+                            f"Радар {self._radar_log_name(radar)} захватил воздушную цель"
+                        )
+                        self._log_target_classification(radar, traj, pos)
 
         lost_pairs = self._active_detections - active_now
         if lost_pairs:
             lost_lookup = {(id(radar), id(traj)): (radar, traj) for radar in self.radars for traj in self.trajectories}
             for pair in lost_pairs:
+                previous_class = self._target_classifications.pop(pair, None)
                 radar_traj = lost_lookup.get(pair)
                 if radar_traj:
                     radar, traj = radar_traj
-                    self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель")
+                    radar.stop_tracking(end_time, traj)
+                    if previous_class:
+                        self.detection_signal.emit(
+                            f"Радар {self._radar_log_name(radar)} потерял из виду цель "
+                            f"класса '{previous_class}'"
+                        )
+                    else:
+                        self.detection_signal.emit(
+                            f"Радар {self._radar_log_name(radar)} потерял из виду воздушную цель"
+                        )
+                    self.debug_signal.emit(
+                        f"TRACK_LOST radar={self._radar_log_name(radar)} "
+                        f"target={traj.name} time={end_time:.2f}"
+                    )
 
         self._active_detections = active_now
+        self._beam_hits = beam_hits_now
 
     def _record_observed_position(self, traj, pos):
         points = self.observed_tracks.setdefault(id(traj), [])
@@ -740,7 +834,23 @@ class PointCanvas(QWidget):
         if not points or math.hypot(points[-1].x() - pos.x(), points[-1].y() - pos.y()) > min_record_distance:
             points.append(QPointF(pos))
 
+    def _log_target_classification(self, radar, traj, pos):
+        pair = (id(radar), id(traj))
+        analysis = radar.analyze_target(traj, pos, self.map_scale)
+        previous_class = self._target_classifications.get(pair)
+        if previous_class == analysis["target_class"]:
+            return
+        self._target_classifications[pair] = analysis["target_class"]
+        self.detection_signal.emit(
+            f"Радар {self._radar_log_name(radar)} оценил ЭПР воздушной цели: "
+            f"{analysis['estimated_rcs_m2']:.2f} м², класс: {analysis['target_class']}, "
+            f"Pr={analysis['received_power_w']:.3e} Вт"
+        )
+
     def is_target_visible_by_any_radar(self, traj):
+        return any(pair[1] == id(traj) for pair in self._beam_hits)
+
+    def is_target_tracked_by_any_radar(self, traj):
         return any(pair[1] == id(traj) for pair in self._active_detections)
 
     def update_missiles(self, dt):
@@ -1027,6 +1137,8 @@ class PointCanvas(QWidget):
                 if pos:
                     if self.is_target_visible_by_any_radar(traj):
                         color = QColor(255, 0, 0)
+                    elif self.is_target_tracked_by_any_radar(traj):
+                        color = QColor(255, 170, 0)
                     else:
                         color = QColor(0, 255, 0) if index == self.active_index else QColor(0, 200, 0)
                     painter.setPen(QPen(color, 2 / self.zoom_level))
@@ -1128,6 +1240,34 @@ class PointCanvas(QWidget):
             painter.setPen(QPen(Qt.GlobalColor.yellow, 1 / self.zoom_level))
             painter.drawPath(path)
 
+            active_targets = self._get_active_targets_for_radar(radar)
+            if active_targets:
+                beam_pen = QPen(QColor(0, 220, 255, 180), 2 / self.zoom_level)
+                painter.setPen(beam_pen)
+                for traj in active_targets:
+                    pos = traj.get_observed_position(self.simulation_time, self.map_scale)
+                    if pos is None:
+                        continue
+                    painter.drawLine(radar.center, pos)
+                    painter.setBrush(QBrush(QColor(0, 220, 255, 200)))
+                    painter.drawEllipse(pos, 4 / self.zoom_level, 4 / self.zoom_level)
+
+                label_rect = QRectF(
+                    radar.center.x() + 8 / self.zoom_level,
+                    radar.center.y() - 24 / self.zoom_level,
+                    28 / self.zoom_level,
+                    16 / self.zoom_level,
+                )
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(0, 120, 200, 220)))
+                painter.drawRoundedRect(label_rect, 3 / self.zoom_level, 3 / self.zoom_level)
+                painter.setPen(QPen(Qt.GlobalColor.white, 1 / self.zoom_level))
+                font = painter.font()
+                font.setPointSizeF(max(7.0, 10.0 / self.zoom_level))
+                font.setBold(True)
+                painter.setFont(font)
+                painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, str(len(active_targets)))
+
         for pad in self.launch_pads:
             painter.setPen(
                 QPen(Qt.GlobalColor.darkMagenta, 1 / self.zoom_level, Qt.PenStyle.DashLine)
@@ -1208,7 +1348,7 @@ class PointCanvas(QWidget):
     # ========== Сохранение/загрузка сценария ==========
     def save_scene(self, path):
         data = {
-            "version": 3,
+            "version": 4,
             "map_scale": self.map_scale,
             "show_grid": self.show_grid,
             "background": {
@@ -1241,6 +1381,8 @@ class PointCanvas(QWidget):
         self.radars.clear()
         self.launch_pads.clear()
         self._active_detections.clear()
+        self._beam_hits.clear()
+        self._target_classifications.clear()
         self.remove_background()
 
         self.set_map_scale(data.get("map_scale", METERS_PER_PIXEL), rescale_objects=False)
@@ -1280,7 +1422,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Симуляция траекторий, радаров и пусковых установок")
         self.setGeometry(100, 100, 1500, 820)
         self.changes_made = False
-        self.logger = EventLogger("logs/simulation.log")
+        project_root = Path(__file__).resolve().parent.parent
+        self.logger = EventLogger(project_root / "logs" / "simulation.log")
+        self.debug_logger = EventLogger(project_root / "logs" / "detection_debug.log")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -1436,16 +1580,26 @@ class MainWindow(QMainWindow):
         traj_layout.addLayout(traj_buttons)
 
         grp_speed = QGroupBox("Параметры активной траектории")
-        speed_layout = QHBoxLayout()
-        speed_layout.addWidget(QLabel("Скорость (м/с):"))
+        speed_layout = QFormLayout()
+        self.target_type_combo = QComboBox()
+        for target_type, profile in TARGET_TYPE_PRESETS.items():
+            self.target_type_combo.addItem(profile["label"], target_type)
         self.speed_spin = QDoubleSpinBox()
         self.speed_spin.setRange(0.1, 10000.0)
         self.speed_spin.setDecimals(1)
         self.speed_spin.setValue(DEFAULT_TARGET_SPEED_MPS)
-        speed_layout.addWidget(self.speed_spin)
+        self.speed_spin.setSuffix(" м/с")
+        self.rcs_spin = QDoubleSpinBox()
+        self.rcs_spin.setRange(0.001, 1000.0)
+        self.rcs_spin.setDecimals(3)
+        self.rcs_spin.setValue(DEFAULT_TARGET_RCS_M2)
+        self.rcs_spin.setSuffix(" м²")
         btn_apply_speed = QPushButton("Применить")
         btn_apply_speed.clicked.connect(self.apply_speed)
-        speed_layout.addWidget(btn_apply_speed)
+        speed_layout.addRow("Тип цели:", self.target_type_combo)
+        speed_layout.addRow("Скорость:", self.speed_spin)
+        speed_layout.addRow("ЭПР:", self.rcs_spin)
+        speed_layout.addRow(btn_apply_speed)
         grp_speed.setLayout(speed_layout)
         traj_layout.addWidget(grp_speed)
 
@@ -1586,6 +1740,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusBar)
 
         self.canvas.detection_signal.connect(self.log_detection)
+        self.canvas.debug_signal.connect(self.log_detection_debug)
         self.canvas.target_detected.connect(self.on_target_detected)
         self.canvas.trajectory_list_changed.connect(self.refresh_trajectory_list)
         self.canvas.radar_list_changed.connect(self.refresh_radar_list)
@@ -1650,21 +1805,35 @@ class MainWindow(QMainWindow):
             pixmap.fill(traj.color)
             icon = QIcon(pixmap)
             speed_mps = self.canvas.world_to_mps_speed(traj.speed)
-            item = QListWidgetItem(icon, f"{traj.name} (скорость: {speed_mps:.0f} м/с)")
+            target_label = self.canvas._get_target_profile(traj.target_type)["label"]
+            item = QListWidgetItem(
+                icon,
+                f"{traj.name} ({target_label}, {speed_mps:.0f} м/с, ЭПР: {traj.radar_cross_section_m2:.1f} м²)",
+            )
             item.setData(Qt.ItemDataRole.UserRole, index)
             self.traj_list.addItem(item)
         if self.canvas.active_index >= 0:
             self.traj_list.setCurrentRow(self.canvas.active_index)
-            speed_mps = self.canvas.world_to_mps_speed(
-                self.canvas.trajectories[self.canvas.active_index].speed
-            )
+            traj = self.canvas.trajectories[self.canvas.active_index]
+            speed_mps = self.canvas.world_to_mps_speed(traj.speed)
             self.speed_spin.setValue(speed_mps)
+            self.rcs_spin.setValue(traj.radar_cross_section_m2)
+            self._set_target_type_combo(traj.target_type)
 
     def on_trajectory_selected(self, item):
         idx = item.data(Qt.ItemDataRole.UserRole)
         self.canvas.set_active_trajectory(idx)
-        self.speed_spin.setValue(self.canvas.world_to_mps_speed(self.canvas.trajectories[idx].speed))
+        traj = self.canvas.trajectories[idx]
+        self.speed_spin.setValue(self.canvas.world_to_mps_speed(traj.speed))
+        self.rcs_spin.setValue(traj.radar_cross_section_m2)
+        self._set_target_type_combo(traj.target_type)
         self.refresh_trajectory_list()
+
+    def _set_target_type_combo(self, target_type):
+        combo_index = self.target_type_combo.findData(target_type)
+        if combo_index < 0:
+            combo_index = self.target_type_combo.findData(DEFAULT_TARGET_TYPE)
+        self.target_type_combo.setCurrentIndex(combo_index)
 
     def show_trajectory_menu(self, pos):
         item = self.traj_list.itemAt(pos)
@@ -1681,15 +1850,36 @@ class MainWindow(QMainWindow):
         menu.exec(self.traj_list.mapToGlobal(pos))
 
     def add_trajectory(self):
+        target_type_labels = [profile["label"] for profile in TARGET_TYPE_PRESETS.values()]
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            "Тип цели",
+            "Выберите тип цели:",
+            target_type_labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        target_type = next(
+            (
+                key
+                for key, profile in TARGET_TYPE_PRESETS.items()
+                if profile["label"] == selected_label
+            ),
+            DEFAULT_TARGET_TYPE,
+        )
+        profile = TARGET_TYPE_PRESETS[target_type]
         default_name = (
-            f"{DEFAULT_TARGET_NAME} {len(self.canvas.trajectories)+1}"
+            f"{profile['default_name']} {len(self.canvas.trajectories)+1}"
             if self.canvas.trajectories
-            else DEFAULT_TARGET_NAME
+            else profile["default_name"]
         )
         name, ok = QInputDialog.getText(self, "Новая траектория", "Имя:", text=default_name)
         if not ok:
             name = None
-        self.canvas.add_trajectory(name)
+        self.canvas.add_trajectory(name, target_type=target_type)
 
     def remove_trajectory(self):
         current = self.traj_list.currentRow()
@@ -1707,10 +1897,13 @@ class MainWindow(QMainWindow):
 
     def apply_speed(self):
         if self.canvas.active_index >= 0:
+            target_type = self.target_type_combo.currentData()
             self.canvas.set_trajectory_speed(
                 self.canvas.active_index,
                 self.canvas.mps_to_world_speed(self.speed_spin.value()),
             )
+            self.canvas.set_trajectory_rcs(self.canvas.active_index, self.rcs_spin.value())
+            self.canvas.set_trajectory_target_type(self.canvas.active_index, target_type)
             self.refresh_trajectory_list()
 
     # ========== Радары ==========
@@ -1813,6 +2006,9 @@ class MainWindow(QMainWindow):
         self.log_text.append(entry)
         self.log_text.ensureCursorVisible()
 
+    def log_detection_debug(self, msg):
+        self.debug_logger.log(msg)
+
     def clear_log(self):
         self.log_text.clear()
         self.statusBar.showMessage("Лог в окне очищен. Файл логов сохранён.", 2000)
@@ -1849,6 +2045,10 @@ class MainWindow(QMainWindow):
         self.canvas.trajectories.clear()
         self.canvas.radars.clear()
         self.canvas.launch_pads.clear()
+        self.canvas._active_detections.clear()
+        self.canvas._beam_hits.clear()
+        self.canvas.observed_tracks.clear()
+        self.canvas._target_classifications.clear()
         self.canvas.active_index = -1
         self.canvas.remove_background()
         self.canvas.set_map_scale(METERS_PER_PIXEL, rescale_objects=False)
