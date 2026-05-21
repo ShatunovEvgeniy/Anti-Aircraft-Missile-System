@@ -1,7 +1,7 @@
 import math
 from PyQt6.QtCore import QPointF
 
-from missile import Missile
+from missile import Missile, predict_intercept_point
 
 
 class LaunchPad:
@@ -15,6 +15,7 @@ class LaunchPad:
         self.launch_range = launch_range
         self.missile_lifetime = missile_lifetime
         self.missiles = []
+        self.miss_markers = []
 
     @staticmethod
     def get_distance(p1, p2):
@@ -26,47 +27,46 @@ class LaunchPad:
     def can_launch(self, target_pos):
         return math.hypot(target_pos.x()-self.center.x(), target_pos.y()-self.center.y()) <= self.launch_range
 
-    def launch_missile(self, target_traj, target_pos, current_time):
-        missile = Missile(self.center, target_traj, target_pos, self.missile_speed, self.missile_lifetime, current_time)
+    def launch_missile(self, target_traj, target_pos, current_time, meters_per_pixel=1.0):
+        target_velocity = target_traj.get_velocity(current_time)
+        predicted_target_pos, _ = predict_intercept_point(
+            self.center,
+            self.missile_speed,
+            target_pos,
+            target_velocity,
+        )
+        missile = Missile(
+            self.center,
+            target_traj,
+            predicted_target_pos,
+            self.missile_speed,
+            self.missile_lifetime,
+            current_time,
+            target_velocity,
+            meters_per_pixel,
+        )
         self.missiles.append(missile)
 
 
     def update_missiles(self, dt, current_time, radars, trajectories):
-        """Обновление состояния ракет"""
-        # Создаем копию списка для безопасного удаления
-        missiles_copy = self.missiles.copy()
-
-        for missile in missiles_copy:
-            # Проверяем, что ракета еще существует
-            if missile not in self.missiles:
-                continue
-
-            # Обновляем позицию ракеты
+        events = []
+        for missile in self.missiles[:]:
             missile.update(dt, current_time, radars, trajectories)
-
-            # Проверка на уничтожение
             if missile.is_dead:
+                if missile.hit_target:
+                    events.append(("target_destroyed", self.name, missile.target_traj.name))
+                elif missile.missed_target:
+                    self.miss_markers.append(missile.miss_pos)
+                    events.append(("missile_missed", self.name, missile.target_traj.name))
+                elif current_time - missile.last_update_time > self.missile_lifetime:
+                    events.append(("missile_expired", self.name, missile.target_traj.name))
                 if missile in self.missiles:
                     self.missiles.remove(missile)
-                continue
-
-            # Проверка попадания в цель
-            if missile.target_traj and not missile.target_traj.is_destroyed:
-                target_pos = missile.target_traj.get_position(current_time)
-                if target_pos:
-                    # Вычисляем расстояние до цели
-                    dx = missile.pos.x() - target_pos.x()
-                    dy = missile.pos.y() - target_pos.y()
-                    dist = math.hypot(dx, dy)
-                    if dist < 10:
-                        missile.target_traj.is_destroyed = True
-                        missile.is_dead = True
-                        if missile in self.missiles:
-                            self.missiles.remove(missile)
-                        continue
+        return events
 
     def reset_simulation_state(self):
         self.missiles.clear()
+        self.miss_markers.clear()
 
     def to_dict(self):
         return {
