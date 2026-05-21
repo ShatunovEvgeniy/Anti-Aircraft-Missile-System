@@ -6,8 +6,6 @@ __pycache__/
 # Test artifacts
 *.pyc
 __pycache__/
-*.html
-*.json
 
 # Dependencies
 .venv/
