@@ -1,0 +1,806 @@
+{
+  "timestamp": "2026-05-21T22:34:41.829226",
+  "duration_seconds": 0.557991,
+  "summary": {
+    "passed": 197,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "coverage": {
+    "percent": 92.05983889528193,
+    "covered_lines": 1600,
+    "missing_lines": 138,
+    "total_lines": 1738
+  },
+  "tests": [
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerInit::test_init_with_string_path",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerInit::test_init_with_path_object",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerInit::test_creates_parent_directories",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_writes_to_file",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_adds_timestamp",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_multiple_entries",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_appends_to_existing_file",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_handles_unicode",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_event_logger.py::TestEventLoggerLog::test_log_returns_formatted_string",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadInit::test_basic_init",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadInit::test_custom_parameters",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadInit::test_center_from_qpointf",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadInit::test_center_from_list",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadGetDistance::test_zero_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadGetDistance::test_horizontal_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadGetDistance::test_vertical_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadCanLaunch::test_target_in_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadCanLaunch::test_target_at_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadCanLaunch::test_target_out_of_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadCanLaunch::test_target_diagonal",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadLaunchMissile::test_launches_missile",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadLaunchMissile::test_missile_starts_at_pad_center",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadLaunchMissile::test_missile_has_correct_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadLaunchMissile::test_missile_has_correct_lifetime",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadUpdateMissiles::test_returns_empty_list_when_no_missiles",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadUpdateMissiles::test_updates_missile_position",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadUpdateMissiles::test_generates_target_destroyed_event",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadUpdateMissiles::test_removes_dead_missiles",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadResetState::test_clears_missiles",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadResetState::test_clears_miss_markers",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadSerialization::test_to_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadSerialization::test_from_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_launchpad.py::TestLaunchPadSerialization::test_roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestDistance::test_zero_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestDistance::test_horizontal_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestDistance::test_vertical_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestSolveInterceptTime::test_zero_missile_speed_returns_none",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestSolveInterceptTime::test_target_at_missile_position",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestSolveInterceptTime::test_stationary_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestSolveInterceptTime::test_moving_target_away",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestSolveInterceptTime::test_impossible_intercept",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestPredictInterceptPoint::test_stationary_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestPredictInterceptPoint::test_moving_target_perpendicular",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestPredictInterceptPoint::test_zero_missile_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileInit::test_basic_init",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileInit::test_hit_radius_constant",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileInit::test_proximity_fuse_radius_constant",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileInit::test_initial_last_known_target_velocity",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileInit::test_meters_per_pixel_minimum",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileUpdate::test_does_not_update_when_dead",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileUpdate::test_dies_when_target_destroyed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileUpdate::test_moves_toward_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileUpdate::test_hits_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileHitCurrentTarget::test_missile_at_target_position",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileHitCurrentTarget::test_missile_within_proximity_fuse",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileHitCurrentTarget::test_missile_misses_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileDistance::test_zero_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_missile.py::TestMissileDistance::test_pythagorean_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_one",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_half",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_monotonic",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_negative",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestSmoothstep::test_smoothstep_above_one",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestStableNoiseSample::test_deterministic_same_inputs",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestStableNoiseSample::test_different_keys",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestStableNoiseSample::test_different_axes",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestStableNoiseSample::test_different_indices",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestStableNoiseSample::test_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_zero_meters_per_pixel",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_negative_meters_per_pixel",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_zero_max_error",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_zero_period",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_zero_time",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_amplitude_scaling",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestGetPositionError::test_continuity",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestTargetPositionError::test_returns_qpointf",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestTargetPositionError::test_uses_target_constants",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestMissilePositionError::test_returns_qpointf",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestMissilePositionError::test_uses_missile_constants",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_motion_errors.py::TestMissilePositionError::test_different_from_target_error",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarInit::test_basic_init",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarInit::test_custom_start_angle",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarInit::test_center_from_qpointf",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarInit::test_center_from_list",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetDistanceToPoint::test_zero_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetDistanceToPoint::test_horizontal_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetDistanceToPoint::test_vertical_distance",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetCurrentAngle::test_no_tracking_rotates",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetCurrentAngle::test_tracking_stays_fixed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarGetCurrentAngle::test_angle_wraps_360",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointAngle::test_angle_east",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointAngle::test_angle_north",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointAngle::test_angle_west",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointAngle::test_angle_south",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointInRange::test_point_at_center",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointInRange::test_point_inside_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointInRange::test_point_at_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarPointInRange::test_point_outside_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarCanTrackPoint::test_in_range_can_track",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarCanTrackPoint::test_out_of_range_cannot_track",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStartTracking::test_sets_tracked_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStartTracking::test_sets_tracked_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStartTracking::test_sets_current_angle_to_point_angle",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStartTracking::test_sets_rotation_reference_time",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarUpdateTracking::test_updates_tracked_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarUpdateTracking::test_updates_rotation_reference_time",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarUpdateTracking::test_angle_moves_toward_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStopTracking::test_clears_tracked_target",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStopTracking::test_clears_tracked_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStopTracking::test_preserves_current_angle",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarStopTracking::test_sets_start_angle",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPoint::test_in_range_and_in_sector",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPoint::test_in_range_but_out_of_sector",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPoint::test_out_of_range",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPoint::test_rotates_into_view",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPointDuringInterval::test_point_in_range_not_in_sector_no_sweep",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPointDuringInterval::test_full_sweep_catches_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPointDuringInterval::test_out_of_range_never_detected",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPointDuringInterval::test_tracking_always_sees_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarContainsPointDuringInterval::test_zero_duration_uses_end_time",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarSerialization::test_to_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarSerialization::test_from_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_radar.py::TestRadarSerialization::test_roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConstants::test_speed_of_sound",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConstants::test_meters_per_pixel",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConstants::test_max_simulation_duration",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConstants::test_animation_interval",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConstants::test_default_playback_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_meters_to_pixels_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_meters_to_pixels_positive",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_meters_to_pixels_negative",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_meters_to_pixels_large_value",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_mps_to_pixels_per_second_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_mps_to_pixels_per_second_positive",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestConversionFunctions::test_mps_to_pixels_per_second_sound_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_target_speed_conversion",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_trajectory_speed_calculation",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_radar_range_conversion",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_radar_rotation_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_missile_speed_conversion",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_missile_lifetime_calculation",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultValues::test_launch_range_conversion",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultNames::test_target_name",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultNames::test_radar_name",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_simulation_defaults.py::TestDefaultNames::test_launchpad_name",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_default_name",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_custom_name",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_default_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_custom_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_default_color_random",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_custom_color",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_initial_points_empty",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_initial_segments_empty",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_initial_length_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_initial_travel_time_infinity",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryInit::test_not_destroyed_initially",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryAddPoint::test_add_single_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryAddPoint::test_add_multiple_points",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryAddPoint::test_segment_created_on_second_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryAddPoint::test_length_calculation",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryAddPoint::test_travel_time_calculation",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryRemovePoint::test_remove_from_empty",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryRemovePoint::test_remove_single_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryRemovePoint::test_remove_updates_length",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryRemovePoint::test_remove_updates_segments",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryComputeSegments::test_empty_points",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryComputeSegments::test_single_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryComputeSegments::test_multiple_points",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPosition::test_destroyed_returns_none",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPosition::test_empty_points_returns_none",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPosition::test_time_zero_returns_first_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPosition::test_time_beyond_travel_returns_none",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPosition::test_intermediate_position",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_empty_segments",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_t_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_t_one",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_t_half",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_t_negative",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetPositionByT::test_t_above_one",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetVelocity::test_destroyed_returns_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetVelocity::test_empty_segments_returns_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetVelocity::test_zero_speed_returns_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetVelocity::test_beyond_travel_time_returns_zero",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryGetVelocity::test_velocity_magnitude",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySetSpeed::test_set_positive_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySetSpeed::test_set_zero_speed_becomes_minimum",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySetSpeed::test_set_negative_speed_becomes_minimum",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySetSpeed::test_updates_travel_time",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryResetState::test_resets_destroyed_flag",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySerialization::test_to_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySerialization::test_from_dict",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectorySerialization::test_roundtrip",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryMotionErrorKey::test_key_updated_on_add_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryMotionErrorKey::test_key_updated_on_remove_point",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryMotionErrorKey::test_key_updated_on_set_speed",
+      "status": "passed"
+    },
+    {
+      "name": "tests/test_trajectory.py::TestTrajectoryMotionErrorKey::test_refresh_method",
+      "status": "passed"
+    }
+  ]
+}
