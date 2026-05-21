@@ -477,44 +477,47 @@ package "src" {
     component "main.py" as MAIN {
         interface "EntryPoint" as EP
     }
-    
+
     component "gui.py" as GUI {
         interface "IUserInterface" as IUI
         class "MainWindow"
         class "PointCanvas"
         class "ScaleDialog"
     }
-    
+
     component "trajectory.py" as TRAJ {
         class "Trajectory"
     }
-    
+
     component "radar.py" as RADAR {
         class "Radar"
     }
-    
+
     component "launchpad.py" as LAUNCH {
         class "LaunchPad"
     }
-    
+
     component "missile.py" as MISSILE {
-        class "Missile"
-        function "predict_intercept_point()"
+        class "Missile" {
+            predict_intercept_point()
+        }
     }
-    
+
     component "motion_errors.py" as ERRORS {
-        function "get_target_position_error()"
-        function "get_missile_position_error()"
+        class "MotionErrors" {
+            get_target_position_error()
+            get_missile_position_error()
+        }
     }
-    
+
     component "event_logger.py" as LOGGER {
         class "EventLogger"
     }
-    
+
     component "simulation_defaults.py" as CONFIG {
         interface "IConfiguration"
     }
-    
+
     component "command_center.py" as COMMAND {
         class "CommandCenter"
     }
