@@ -639,8 +639,7 @@ class PointCanvas(QWidget):
         for pad in self.launch_pads:
             pad.reset_simulation_state()
         for radar in self.radars:
-            radar.tracked_targets.clear()
-            pass
+            radar.stop_tracking(self.simulation_time)
 
     def _update_time_display(self):
         if self.time_label:
@@ -693,19 +692,19 @@ class PointCanvas(QWidget):
         if end_time is None:
             end_time = self.simulation_time
 
-        # Для новых радаров - устанавливаем время инициализации
+        active_now = set()
         for radar in self.radars:
-            if not hasattr(radar, '_initialization_time'):
-                radar.set_initialization_time(end_time)
-
-        for radar in self.radars:
-            # Очищаем старые цели (не видели больше 30 секунд)
-            radar.cleanup_dead_targets(end_time, timeout=30.0)
-
-            # Пропускаем обнаружения в момент инициализации
-            if radar._initialized and end_time <= radar._initialization_time + 0.001:
-                continue
-
+            if radar.tracked_target is not None:
+                traj = radar.tracked_target
+                if not traj.is_destroyed:
+                    pos = traj.get_observed_position(end_time, self.map_scale)
+                    if pos and radar.can_track_point(pos):
+                        if radar.update_tracking(pos, end_time):
+                            active_now.add((id(radar), id(traj)))
+                            self._record_observed_position(traj, pos)
+                            self.target_detected.emit(traj, pos)
+                            continue
+                radar.stop_tracking(end_time)
             for traj in self.trajectories:
                 if traj.is_destroyed:
                     continue
@@ -714,26 +713,26 @@ class PointCanvas(QWidget):
                 if not pos:
                     continue
 
-                # Проверяем, что интервал времени достаточно большой для осмысленного обнаружения
-                time_interval = abs(end_time - start_time)
-                if time_interval < 0.01:  # Если интервал слишком маленький
-                    # Для начального момента (0,0) не считаем обнаружением
-                    if start_time == 0 and end_time == 0:
-                        continue
-                    # Для одноточечной проверки - используем contains_point
-                    if radar.contains_point(pos, end_time):
-                        # Дополнительная проверка: не первый ли это кадр после создания радара
-                        if hasattr(radar, '_initialization_time') and end_time > radar._initialization_time + 0.1:
-                            radar.record_detection(traj, pos, end_time)
-                            self.target_detected.emit(traj, pos)
-                else:
-                    # Нормальный интервал времени - используем interval проверку
-                    if radar.contains_point_during_interval(pos, start_time, end_time):
-                        # Дополнительная проверка: не первый ли это кадр после создания радара
-                        if hasattr(radar, '_initialization_time') and end_time > radar._initialization_time + 0.1:
-                            radar.record_detection(traj, pos, end_time)
-                            self.target_detected.emit(traj, pos)
+                pair = (id(radar), id(traj))
+                if radar.contains_point_during_interval(pos, start_time, end_time):
+                    active_now.add(pair)
+                    self._record_observed_position(traj, pos)
+                    self.target_detected.emit(traj, pos)
+                    if pair not in self._active_detections:
+                        radar.start_tracking(traj, pos, end_time)
+                        self.detection_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
+                    break
 
+        lost_pairs = self._active_detections - active_now
+        if lost_pairs:
+            lost_lookup = {(id(radar), id(traj)): (radar, traj) for radar in self.radars for traj in self.trajectories}
+            for pair in lost_pairs:
+                radar_traj = lost_lookup.get(pair)
+                if radar_traj:
+                    radar, traj = radar_traj
+                    self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель {traj.name}")
+
+        self._active_detections = active_now
 
     def _record_observed_position(self, traj, pos):
         points = self.observed_tracks.setdefault(id(traj), [])
@@ -1066,7 +1065,6 @@ class PointCanvas(QWidget):
                     for point in traj.points:
                         painter.drawEllipse(point, 4 / self.zoom_level, 4 / self.zoom_level)
 
-        self.draw_radar_detections(painter)
         for radar in self.radars:
             # Загрузка иконки радара (загружаем один раз, кэшируем)
             if not hasattr(self, '_radar_icon'):
@@ -1076,7 +1074,7 @@ class PointCanvas(QWidget):
                     self._radar_icon = QPixmap(str(ICON_PATH))
                 else:
                     self._radar_icon = None
-                    print(f"Иконка радара не найдена: {ICON_PATH}")
+                    print(f"Иконка радара не найдена: {icon_path}")
 
             # Рисуем иконку вместо кружочка
             if self._radar_icon and not self._radar_icon.isNull():
@@ -1204,52 +1202,6 @@ class PointCanvas(QWidget):
                 painter.setBrush(QBrush(QColor(255, 165, 0)))
                 painter.setPen(QPen(Qt.GlobalColor.black, 1 / self.zoom_level))
                 painter.drawPolygon(QPolygonF(points))
-
-        painter.restore()
-
-    #===== Отрисовка найденных радаром траекторий ======
-    def draw_radar_detections(self, painter):
-        """Рисует точки обнаружения от всех радаров"""
-        painter.save()
-
-        for radar in self.radars:
-            # Получаем все точки обнаружения для этого радара
-            for traj_id, detection_points in radar.get_all_detection_points().items():
-                if not detection_points:
-                    continue
-
-                # Получаем цвет для этой цели (свой у каждого радара)
-                color_rgb = radar._get_target_color(traj_id) if hasattr(radar, '_get_target_color') else (255, 70, 70)
-                color = QColor(*color_rgb)
-
-                # Рисуем точки
-                painter.setPen(QPen(color, 3 / self.zoom_level))
-                painter.setBrush(QBrush(color))
-
-                for point, detection_time in detection_points:
-                    # Рисуем отметку в виде крестика или кружка
-                    size = 6 / self.zoom_level
-
-                    # Крестик для отметки
-                    painter.drawLine(
-                        QPointF(point.x() - size, point.y() - size),
-                        QPointF(point.x() + size, point.y() + size)
-                    )
-                    painter.drawLine(
-                        QPointF(point.x() - size, point.y() + size),
-                        QPointF(point.x() + size, point.y() - size)
-                    )
-
-                    # Также маленький кружок в центре
-                    painter.drawEllipse(point, 2 / self.zoom_level, 2 / self.zoom_level)
-
-                # Соединяем точки одной цели линиями (траектория по данным радара)
-                if len(detection_points) > 1:
-                    painter.setPen(QPen(color, 2 / self.zoom_level, Qt.PenStyle.DashLine))
-                    for i in range(1, len(detection_points)):
-                        p1, _ = detection_points[i - 1]
-                        p2, _ = detection_points[i]
-                        painter.drawLine(p1, p2)
 
         painter.restore()
 
