@@ -1,0 +1,152 @@
+{
+    "version": 4,
+    "map_scale": 500.0,
+    "show_grid": true,
+    "background": {
+        "path": "C:/Users/Евгений/Documents/GitHub/Anti-Aircraft-Missile-System/images/map_demo.png",
+        "opacity": 0.7
+    },
+    "trajectories": [
+        {
+            "name": "Ту-160",
+            "color": {
+                "r": 152,
+                "g": 62,
+                "b": 0
+            },
+            "speed": 0.5,
+            "radar_cross_section_m2": 18.0,
+            "target_type": "heavy_aircraft",
+            "points": [
+                [
+                    684.0,
+                    327.0
+                ],
+                [
+                    742.0,
+                    595.0
+                ]
+            ]
+        },
+        {
+            "name": "БПЛА 2",
+            "color": {
+                "r": 224,
+                "g": 100,
+                "b": 221
+            },
+            "speed": 0.14,
+            "radar_cross_section_m2": 0.2,
+            "target_type": "uav",
+            "points": [
+                [
+                    552.0,
+                    76.0
+                ],
+                [
+                    542.0,
+                    124.0
+                ],
+                [
+                    573.0,
+                    77.0
+                ],
+                [
+                    585.0,
+                    115.0
+                ],
+                [
+                    596.0,
+                    86.0
+                ],
+                [
+                    621.0,
+                    50.0
+                ],
+                [
+                    644.0,
+                    72.0
+                ],
+                [
+                    658.0,
+                    35.0
+                ]
+            ]
+        },
+        {
+            "name": "Ту-160 3",
+            "color": {
+                "r": 116,
+                "g": 96,
+                "b": 117
+            },
+            "speed": 0.5,
+            "radar_cross_section_m2": 18.0,
+            "target_type": "heavy_aircraft",
+            "points": [
+                [
+                    554.0,
+                    252.0
+                ],
+                [
+                    670.0,
+                    160.0
+                ]
+            ]
+        }
+    ],
+    "radars": [
+        {
+            "name": "Небо-СВ",
+            "center": [
+                1012.0,
+                211.0
+            ],
+            "max_range": 600.0,
+            "view_angle": 6.0,
+            "rotation_speed": 36.0,
+            "start_angle": 0.0,
+            "transmit_power_w": 1500000.0,
+            "antenna_gain": 4000.0,
+            "wavelength_m": 0.1,
+            "system_losses": 1.5
+        },
+        {
+            "name": "Небо-СВ",
+            "center": [
+                1058.0,
+                601.0
+            ],
+            "max_range": 600.0,
+            "view_angle": 6.0,
+            "rotation_speed": 36.0,
+            "start_angle": 0.0,
+            "transmit_power_w": 1500000.0,
+            "antenna_gain": 4000.0,
+            "wavelength_m": 0.1,
+            "system_losses": 1.5
+        }
+    ],
+    "launchpads": [
+        {
+            "name": "С-300ПМУ",
+            "center": [
+                916.0,
+                475.0
+            ],
+            "missile_speed": 4.0,
+            "launch_range": 300.0,
+            "missile_lifetime": 75.0
+        },
+        {
+            "name": "С-300ПМУ",
+            "center": [
+                759.0,
+                71.0
+            ],
+            "missile_speed": 4.0,
+            "launch_range": 260.0,
+            "missile_lifetime": 75.0
+        }
+    ]
+}
