@@ -775,6 +775,7 @@ class PointCanvas(QWidget):
                         active_now.add(pair)
                         radar.update_tracking(traj, pos, end_time)
                         self._record_observed_position(traj, pos)
+                        self.target_detected.emit(traj, pos)
                         self.debug_signal.emit(
                             f"TRACK_UPDATE radar={self._radar_log_name(radar)} "
                             f"target={traj.name} time={end_time:.2f}"
