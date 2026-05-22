@@ -58,7 +58,7 @@ class LaunchPad:
                 elif missile.missed_target:
                     self.miss_markers.append(missile.miss_pos)
                     events.append(("missile_missed", self.name, missile.target_traj.name))
-                elif current_time - missile.last_update_time > self.missile_lifetime:
+                elif current_time - missile.creation_time > self.missile_lifetime:
                     events.append(("missile_expired", self.name, missile.target_traj.name))
                 if missile in self.missiles:
                     self.missiles.remove(missile)

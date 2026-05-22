@@ -123,6 +123,10 @@ class Missile:
         if self.is_dead:
             return
 
+        if current_time - self.creation_time > self.lifetime:
+            self.is_dead = True
+            return
+
         if self.target_traj.is_destroyed:
             self.is_dead = True
             return
@@ -143,9 +147,6 @@ class Missile:
             self.last_known_target_pos = QPointF(observed_target_pos)
             self.last_known_target_velocity = QPointF(self.target_traj.get_velocity(current_time))
             self.last_update_time = current_time
-        elif current_time - self.last_update_time > self.lifetime:
-            self.is_dead = True
-            return
 
         time_since_last_update = max(0.0, current_time - self.last_update_time)
         estimated_target_pos = QPointF(
