@@ -502,7 +502,7 @@ class PointCanvas(QWidget):
         self._recalc_max_time()
         self._update_all_positions()
         self.trajectory_list_changed.emit()
-        self.detection_signal.emit(f"Создана цель {name}")
+        self.detection_signal.emit(f"Создана цель")
         self.update()
         return traj
 
@@ -523,7 +523,7 @@ class PointCanvas(QWidget):
             self._recalc_max_time()
             self._update_all_positions()
             self.trajectory_list_changed.emit()
-            self.detection_signal.emit(f"Удалена цель {traj.name}")
+            self.detection_signal.emit(f"Удалена цель")
             self.update()
 
     def set_active_trajectory(self, idx):
@@ -720,7 +720,7 @@ class PointCanvas(QWidget):
                     self.target_detected.emit(traj, pos)
                     if pair not in self._active_detections:
                         radar.start_tracking(traj, pos, end_time)
-                        self.detection_signal.emit(f"Радар {radar.name} захватил цель {traj.name}")
+                        self.detection_signal.emit(f"Радар {radar.name} захватил цель")
                     break
 
         lost_pairs = self._active_detections - active_now
@@ -730,7 +730,7 @@ class PointCanvas(QWidget):
                 radar_traj = lost_lookup.get(pair)
                 if radar_traj:
                     radar, traj = radar_traj
-                    self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель {traj.name}")
+                    self.detection_signal.emit(f"Радар {radar.name} потерял из виду цель")
 
         self._active_detections = active_now
 
@@ -748,14 +748,14 @@ class PointCanvas(QWidget):
             events = pad.update_missiles(dt, self.simulation_time, self.radars, self.trajectories)
             for event_type, launcher_name, target_name in events:
                 if event_type == "target_destroyed":
-                    self.detection_signal.emit(f"Цель {target_name} была сбита установкой {launcher_name}")
+                    self.detection_signal.emit(f"Цель была сбита установкой {launcher_name}")
                 elif event_type == "missile_missed":
                     self.detection_signal.emit(
-                        f"Ракета установки {launcher_name} промахнулась по цели {target_name}"
+                        f"Ракета установки {launcher_name} промахнулась по цели"
                     )
                 elif event_type == "missile_expired":
                     self.detection_signal.emit(
-                        f"Ракета установки {launcher_name} самоликвидировалась: цель {target_name} потеряна"
+                        f"Ракета установки {launcher_name} самоликвидировалась: цель потеряна"
                     )
 
     # ========== Анимация и время ==========
@@ -1043,8 +1043,8 @@ class PointCanvas(QWidget):
                 painter.setBrush(QBrush(observed_color))
                 for point in observed_points:
                     painter.drawEllipse(point, 4 / self.zoom_level, 4 / self.zoom_level)
-                for point_index in range(1, len(observed_points)):
-                    painter.drawLine(observed_points[point_index - 1], observed_points[point_index])
+#                for point_index in range(1, len(observed_points)):
+#                    painter.drawLine(observed_points[point_index - 1], observed_points[point_index])
                 last_point = observed_points[-1]
                 painter.setPen(QPen(QColor(180, 0, 0), 2 / self.zoom_level))
                 painter.setBrush(QBrush(QColor(255, 120, 120)))
@@ -1799,11 +1799,11 @@ class MainWindow(QMainWindow):
                 already = any(missile.target_traj == traj for missile in pad.missiles)
                 if not already:
                     self.log_detection(
-                        f"Командный центр отправил команду установке {pad.name} сбить цель {traj.name}"
+                        f"Командный центр отправил команду установке {pad.name} сбить цель"
                     )
                     pad.launch_missile(traj, pos, self.canvas.simulation_time, self.canvas.map_scale)
                     self.statusBar.showMessage(
-                        f"Пусковая установка '{pad.name}' запустила ракету по '{traj.name}'",
+                        f"Пусковая установка '{pad.name}' запустила ракету по цели",
                         2000,
                     )
 
