@@ -25,6 +25,29 @@ DEFAULT_TARGET_NAME = "МиГ-31БМ"
 DEFAULT_TARGET_SPEED_KMH = 3_000.0
 DEFAULT_TARGET_SPEED_MPS = DEFAULT_TARGET_SPEED_KMH / 3.6
 DEFAULT_TRAJECTORY_SPEED = round(mps_to_pixels_per_second(DEFAULT_TARGET_SPEED_MPS), 2)
+DEFAULT_TARGET_RCS_M2 = 5.0
+DEFAULT_TARGET_TYPE = "fighter"
+
+TARGET_TYPE_PRESETS = {
+    "fighter": {
+        "label": "Самолёт",
+        "default_name": "МиГ-31БМ",
+        "speed_mps": DEFAULT_TARGET_SPEED_MPS,
+        "rcs_m2": 5.0,
+    },
+    "uav": {
+        "label": "БПЛА",
+        "default_name": "БПЛА",
+        "speed_mps": 70.0,
+        "rcs_m2": 0.2,
+    },
+    "heavy_aircraft": {
+        "label": "Тяжёлый самолёт",
+        "default_name": "Ту-160",
+        "speed_mps": 250.0,
+        "rcs_m2": 18.0,
+    },
+}
 
 DEFAULT_RADAR_NAME = 'Небо-СВ'
 DEFAULT_RADAR_RANGE_M = 350_000.0
